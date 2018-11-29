@@ -1,0 +1,6 @@
+---- constructKeyReq Matches (5 in 1 files) ----
+test.c (test):int constructKeyReq(
+test.c (test):	constructKeyReq(&keyReq, KeyID, userID, fingerprint, DevlpID, AppID, timeStamp - 3600, timeStamp + 3600, prikey, prikeylen, pubkey, pubkeylen);
+test.c (test):	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
+test.c (test):	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
+test.c (test):	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
