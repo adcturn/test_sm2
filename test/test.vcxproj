@@ -152,11 +152,13 @@
   <ItemGroup>
     <ClCompile Include="cryptocard.c" />
     <ClCompile Include="sha256.c" />
+    <ClCompile Include="sm3.c" />
     <ClCompile Include="test.c" />
     <ClCompile Include="userkey.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="cryptocard.h" />
+    <ClInclude Include="sm3.h" />
   </ItemGroup>
   <ItemGroup>
     <Library Include="libusb-usbdk-1.0.lib" />

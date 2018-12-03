@@ -10,6 +10,7 @@
 #include <openssl/ecdsa.h>
 #include "sm2.h"
 #include "sha256.h"
+#include "sm3.h"
 
 // #pragma comment (lib, "sm2lib.lib")
 
@@ -55,14 +56,10 @@ EC_KEY	*eckey = NULL;
 
 typedef uint8 SLC_BYTE;
 
-void SlcSha256(uint8 *msg, uint32 msglen, uint8 *digest, uint32 digestbufflen, uint32 *digestlen)
+void SlcSm3(uint8 *msg, uint32 msglen, uint8 *digest, uint32 digestbufflen, uint32 *digestlen)
 {
-	SHA256Context ctx;
-
-	SHA256Init(&ctx);
-	SHA256Update(&ctx, msg, msglen);
-	SHA256Final(&ctx, digest);
-	*digestlen = SHA256_HASH_SIZE;
+	sm3_ex(msg, msglen, digest);
+	*digestlen = SM3_HASH_SIZE;
 }
 
 void bn2hex(uint8 *bin, uint32 len, char *hex)
@@ -75,6 +72,78 @@ void bn2hex(uint8 *bin, uint32 len, char *hex)
 		hex += 2;
 	}
 
+}
+
+const UINT8 TAG_CLASS_CONTEXT = 0xA0;
+const UINT8 TAG_INTEGER = 0x02;
+const UINT8 TAG_BIT_STRING = 0x03;
+const UINT8 TAG_OCTET_STRING = 0x04;
+const UINT8 TAG_OID = 0x06;
+const UINT8 TAG_SEQUENCE = 0x30;
+
+UINT16 eccDerDecodeSignature(UINT8 *pu8DerSig, UINT16 u16DerSigLen, UINT8 *pu8Sig, UINT16 u16SigLen)
+{
+	UINT16 u16Index = 0;
+	UINT16 u16Slen = 0;
+
+	// check outer sequence
+	if (pu8DerSig[0] != TAG_SEQUENCE)
+		return 1;
+
+	if ((pu8DerSig[1] != u16DerSigLen - 2)
+		|| (pu8DerSig[1] != 4 + pu8DerSig[3] + pu8DerSig[4 + pu8DerSig[3] + 1]))
+		return 1;
+
+	// check integer r
+	if (pu8DerSig[2] != TAG_INTEGER)
+		return 1;
+
+	if ((pu8DerSig[4] != 0) && (pu8DerSig[3] > u16SigLen / 2))
+		return 1;
+
+	u16Index = 4;
+
+	if (pu8DerSig[3] == u16SigLen / 2 + 1)
+		u16Index++;
+
+	if (pu8DerSig[3] < u16SigLen / 2)
+	{
+		memset(pu8Sig, 0, u16SigLen / 2 - pu8DerSig[3]);
+		memcpy(pu8Sig + u16SigLen / 2 - pu8DerSig[3], pu8DerSig + u16Index, pu8DerSig[3]);
+
+		u16Index += pu8DerSig[3];
+	}
+	else
+	{
+		memcpy(pu8Sig, pu8DerSig + u16Index, u16SigLen / 2);
+
+		u16Index += u16SigLen / 2;
+	}
+
+	// check integer s
+	if (pu8DerSig[u16Index] != TAG_INTEGER)
+		return 1;
+
+	u16Slen = pu8DerSig[u16Index + 1];
+	if ((pu8DerSig[u16Index + 2] != 0) && (u16Slen > u16SigLen / 2))
+		return 1;
+
+	if (u16Slen == u16SigLen / 2 + 1)
+		u16Index++;
+
+	u16Index += 2;
+
+	if (u16Slen < u16SigLen / 2)
+	{
+		memset(pu8Sig + u16SigLen / 2, 0, u16SigLen / 2 - u16Slen);
+		memcpy(pu8Sig + u16SigLen - u16Slen, pu8DerSig + u16Index, u16Slen);
+	}
+	else
+	{
+		memcpy(pu8Sig + u16SigLen / 2, pu8DerSig + u16Index, u16SigLen / 2);
+	}
+
+	return 0;
 }
 
 int sm2SignMsg(
@@ -92,7 +161,8 @@ int sm2SignMsg(
 	char vkey[65];
 	char pkey[131];
 	unsigned char digest[32];
-	unsigned int digestlen, siglen;
+	unsigned char dersig[256];
+	unsigned int digestlen, dersiglen, siglen;
 
 	bn2hex(prikey, prikeylen, vkey);
 	bn2hex(pubkey, pubkeylen, pkey);
@@ -117,14 +187,15 @@ int sm2SignMsg(
 		return 1;
 	}
 
-	siglen = 256;
-	ret = SM2_sign(1, digest, sizeof(digest), sig, &siglen, eckey);
+	dersiglen = 256;
+	ret = SM2_sign(1, digest, sizeof(digest), dersig, &dersiglen, eckey);
 	if (ret != 1)
 	{
 		cc_error("SM2_digest Failed:0x%08X\n", ret);
 		return 1;
 	}
 
+	ret = eccDerDecodeSignature(dersig, dersiglen, sig, 64);
 	return 0;
 }
 
@@ -135,8 +206,8 @@ int constructUserKey(USER_PUB_KEY *userKey, const uint8 *OwnerID, const uint8 *u
 	userKey->TimeStamp = 0;
 	userKey->AlgoID = ALGID_SM2_PUB;
 	userKey->KeyBits = 256;
-	userKey->KeyLen = 65;
-	memcpy(userKey->KeyValue, userpubkey, 65);
+	userKey->KeyLen = 64;
+	memcpy(userKey->KeyValue, userpubkey+1, 64);
 
 	return 0;
 }
@@ -275,7 +346,7 @@ int initUser(
 	}
 
 	// 计算公钥结构指纹
-	SlcSha256((SLC_BYTE *)userKey, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
+	SlcSm3((SLC_BYTE *)userKey, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
 
 	timeStamp = time(NULL);
 	// 构建云端密钥请求
@@ -416,7 +487,7 @@ int test_positive()
 
 	timeStamp = time(NULL);
 	// 计算公钥结构指纹
-	SlcSha256((SLC_BYTE *)&userKey_Bob, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
+	SlcSm3((SLC_BYTE *)&userKey_Bob, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
 
 	// 构建云端密钥请求
 	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
@@ -560,7 +631,7 @@ int test_positive()
 
 	//  密钥已过期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
+	if (ret != CC_ERROR_SUCCESS)//==改！=
 	{
 		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
 		return 1;
@@ -617,7 +688,7 @@ int test_positive()
 
 	// 生成自己的S1
 	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
+	if (ret != CC_ERROR_SUCCESS)//==改！=
 	{
 		cc_error("GenerateS1 Failed:0x%08X\n", ret);
 		return 1;
@@ -1416,7 +1487,7 @@ int test_negtive()
 	}
 
 	// 计算公钥结构指纹
-	SlcSha256((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
+	SlcSm3((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
 
 	timeStamp = time(NULL);
 	
@@ -1574,7 +1645,7 @@ int test_negtive()
 	}
 
 	// 计算公钥结构指纹
-	SlcSha256((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
+	SlcSm3((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
 
 	timeStamp = time(NULL);
 	// 构建密钥有效期
@@ -2000,6 +2071,7 @@ int main()
 		printf("EC_KEY_set_group Failed!\n");
 		goto end;
 	}
+
 
 	if (0x00 != OpenDevice())
 	{
