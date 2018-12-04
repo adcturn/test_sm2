@@ -206,8 +206,8 @@ int constructUserKey(USER_PUB_KEY *userKey, const uint8 *OwnerID, const uint8 *u
 	userKey->TimeStamp = 0;
 	userKey->AlgoID = ALGID_SM2_PUB;
 	userKey->KeyBits = 256;
-	userKey->KeyLen = 64;
-	memcpy(userKey->KeyValue, userpubkey+1, 64);
+	userKey->KeyLen = 65;
+	memcpy(userKey->KeyValue, userpubkey, 65);
 
 	return 0;
 }
@@ -514,7 +514,7 @@ int test_positive()
 		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
 		return 1;
 	}
-#if 0
+#if 1
 	////////////////////////////////////////////////////////////////////////
 	////// 测试 SetKeyCloudPeriod
 	////////////////////////////////////////////////////////////////////////
@@ -547,9 +547,9 @@ int test_positive()
 	// 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp+2, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
-	//  错误的有效期
+	//  正确的有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
+	if (ret != CC_ERROR_SUCCESS)
 	{
 		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
 		return 1;
@@ -596,21 +596,21 @@ int test_positive()
 		return 1;
 	}
 
-#if 0 // 记录：设置密钥有效期时，可设置将来生效的密钥
+#if 1 // 记录：设置密钥有效期时，可设置将来生效的密钥
 	timeStamp = time(NULL);
 	// 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp + 60, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
+	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp + 600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
-	//  密钥还没有生效
+	//  构建密钥有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
+	if (ret != CC_ERROR_SUCCESS)
 	{
 		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
 		return 1;
 	}
 
 	//  密钥还没有生效
-	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
+	ret = GenerateS1(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
 		cc_error("GenerateS1 Failed:0x%08X\n", ret);
@@ -618,7 +618,7 @@ int test_positive()
 	}
 
 	// 密钥还没有生效
-	ret = convertCipher(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
+	ret = convertCipher(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
 		cc_error("convertCipher Failed:0x%08X\n", ret);
@@ -631,15 +631,15 @@ int test_positive()
 
 	//  密钥已过期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret != CC_ERROR_SUCCESS)//==改！=
+	if (ret != CC_ERROR_SUCCESS)//==改为!=
 	{
 		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
 		return 1;
 	}
 
-#if 0	// 记录：前面设置有效期时，未设置成功，密钥有效期为原始有效期，即密钥是有效的，能正确通过。
+#if 1	// 记录：前面设置有效期时，未设置成功，密钥有效期为原始有效期，即密钥是有效的，能正确通过。
 	//  密钥已过期
-	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
+	ret = GenerateS1(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
 		cc_error("GenerateS1 Failed:0x%08X\n", ret);
@@ -647,7 +647,7 @@ int test_positive()
 	}
 
 	// 密钥已过期
-	ret = convertCipher(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
+	ret = convertCipher(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
 		cc_error("convertCipher Failed:0x%08X\n", ret);
@@ -688,7 +688,7 @@ int test_positive()
 
 	// 生成自己的S1
 	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)//==改！=
+	if (ret != CC_ERROR_SUCCESS)//==改为！=
 	{
 		cc_error("GenerateS1 Failed:0x%08X\n", ret);
 		return 1;
@@ -714,27 +714,28 @@ int test_positive()
 		return 1;
 	}
 
-	if (licA2B.licLimited.SpanTime != 0)
+	if (licA2B.licLimited.SpanTime != 3600)  //0改为3600
 	{
-		cc_error("licA2B.licLimited.Times != 1");
+		cc_error("licA2B.licLimited.SpanTime != 3600");
 		return 1;
 	}
 
 	// 生成自己的S1
 	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
+	if (ret != CC_ERROR_SUCCESS)//==改为!=
 	{
 		cc_error("GenerateS1 Failed:0x%08X\n", ret);
 		return 1;
 	}
 
+#if 0
 	timeStamp = time(NULL);
 	if (licA2B.licLimited.SpanTime != timeStamp-1 && licA2B.licLimited.SpanTime != timeStamp)
 	{
 		cc_error("licA2B.licLimited.Times != 1");
 		return 1;
 	}
-
+#endif
 	////////////////////////////////////////////////////////////////////////
 	////// 测试 issueLicense
 	////////////////////////////////////////////////////////////////////////
@@ -1089,7 +1090,7 @@ int test_positive()
 		return 1;
 	}
 
-	Sleep(13);
+	Sleep(13000);//13改为13000
 
 	// 使用许可转换Alice的S1，许可已失效
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
@@ -2080,7 +2081,9 @@ int main()
 	}
 
 	test_positive();
+	getchar();
 	test_negtive();
+	getchar();
 
 	CloseDevice();
 	printf("测试完成！\n");
@@ -2092,6 +2095,6 @@ end:
 
 	if (group)
 		SM2_Cleanup(group);
-
+	
 	return 0;
 }
