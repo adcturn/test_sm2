@@ -18,7 +18,7 @@ typedef struct tagKEY_REC_REQ
 	uint8  OwnerKeyFingerprint[32];           // 密钥所有者的密钥ID，用户公钥的指纹
 	uint8  DevlpID[8];                        // APP开发商ID
 	uint8  AppID[8];                          // APP ID
-	int64 timeStamp;                 // 密钥请求生成的时间，5分钟之后失效
+	int64 timeStamp;						  // 密钥请求生成的时间，5分钟之后失效
 	uint32 AlgoID;                            // 密钥类型，算法
 	uint32 KeyBits;                           // 密钥bit长度
 	int64 BeginTime;                          // 密钥有效开始时间
@@ -27,6 +27,7 @@ typedef struct tagKEY_REC_REQ
 }KEY_REC_REQ;
 
 #define ALGID_AES      0x00000001             // AES密钥
+#define ALGID_SM4      0x00000002			  // SM4密钥
 #define ALGID_RSA_PUB  0x00010100             // RSA公钥
 #define ALGID_RSA_PRI  0x00020100             // RSA私钥
 #define ALGID_SM2_PUB  0x00010200             // SM2公钥
@@ -58,7 +59,7 @@ typedef struct tagUSER_PUB_KEY
 	uint32 AlgoID;                            // 密钥类型，算法
 	uint32 KeyBits;                           // 密钥bit长度
 	uint32 KeyLen;                            // keyValue中的有效密钥长度
-	uint8  KeyValue[300];                     // 密钥类型，算法
+	uint8  KeyValue[300];                     // 用户公钥
 	uint8  Mac[32];                           // 用户公钥的校验码，由硬件计算，硬件验证
 }USER_PUB_KEY;
 
@@ -70,8 +71,8 @@ typedef struct tagLIC_LIMITED
 	int64 EndTime;                            // 结束时间
 	int64 FirstTime;                          // 第一次使用时间
 	int64 SpanTime;                           // 可用时间段
-	int64 Times;                              // 可用此次数
-	uint32 Policy;                            // 策略，标识读，写，打印，继承
+	int64 Times;                              // 可用次数
+	uint32 Policy;                            // 策略，标识读，写，打印，继承，导出
 	uint32 Reserved;                          // 保留字，用于结构体对齐
 }LIC_LIMITED;
 

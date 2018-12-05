@@ -234,8 +234,8 @@ int constructKeyReq(
 	memcpy(req->DevlpID, DevlpID, 8);
 	memcpy(req->AppID, AppID, 8);
 	req->timeStamp = timestamp;
-	req->AlgoID = ALGID_AES;
-	req->KeyBits = 256;
+	req->AlgoID = ALGID_SM4;
+	req->KeyBits = 128;
 	req->BeginTime = BeginTime;
 	req->EndTime = EndTime;
 
@@ -1351,7 +1351,7 @@ int test_positive()
 
 	// 签发许可
 	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret == CC_ERROR_SUCCESS)
+	if (ret != CC_ERROR_SUCCESS)
 	{
 		cc_error("issueLicense Failed:0x%08X\n", ret);
 		return 1;
@@ -1428,10 +1428,10 @@ int test_negtive()
 	userKey_Alice.Version = VERSION_CURRENT_VERSION+1;
 	memcpy(userKey_Alice.OwnerUserID, USER_ID_ALICE, 16);
 	userKey_Alice.TimeStamp = 0;
-	userKey_Alice.AlgoID = ALGID_RSA_PUB;
-	userKey_Alice.KeyBits = 2048;
-	userKey_Alice.KeyLen = 270;
-	memcpy(userKey_Alice.KeyValue, userpubkey_alice + 12, 270);
+	userKey_Alice.AlgoID = ALGID_SM2_PUB;
+	userKey_Alice.KeyBits = 256;
+	userKey_Alice.KeyLen = 65;
+	memcpy(userKey_Alice.KeyValue, userpubkey_alice, 65);
 
 	// 对公钥结构签名（MAC）
 	ret = SignUserPubKey(&userKey_Alice);
@@ -1446,9 +1446,9 @@ int test_negtive()
 	memcpy(userKey_Alice.OwnerUserID, USER_ID_ALICE, 16);
 	userKey_Alice.TimeStamp = 0;
 	userKey_Alice.AlgoID = ALGID_AES;
-	userKey_Alice.KeyBits = 2048;
-	userKey_Alice.KeyLen = 270;
-	memcpy(userKey_Alice.KeyValue, userpubkey_alice + 12, 270);
+	userKey_Alice.KeyBits = 256;
+	userKey_Alice.KeyLen = 65;
+	memcpy(userKey_Alice.KeyValue, userpubkey_alice, 65);
 
 	// 对公钥结构签名（MAC）
 	ret = SignUserPubKey(&userKey_Alice);
@@ -1462,12 +1462,13 @@ int test_negtive()
 	userKey_Alice.Version = VERSION_CURRENT_VERSION;
 	memcpy(userKey_Alice.OwnerUserID, USER_ID_ALICE, 16);
 	userKey_Alice.TimeStamp = 0;
-	userKey_Alice.AlgoID = ALGID_RSA_PUB;
-	userKey_Alice.KeyBits = 1024;
-	userKey_Alice.KeyLen = 270;
-	memcpy(userKey_Alice.KeyValue, userpubkey_alice + 12, 270);
+	userKey_Alice.AlgoID = ALGID_SM2_PUB;
+	userKey_Alice.KeyBits = 1000;
+	userKey_Alice.KeyLen = 65;
+	memcpy(userKey_Alice.KeyValue, userpubkey_alice, 65);
 
 	// 对公钥结构签名（MAC）
+
 	ret = SignUserPubKey(&userKey_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
@@ -1499,8 +1500,8 @@ int test_negtive()
 	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
 	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
 	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_AES;
-	keyReq.KeyBits = 256;
+	keyReq.AlgoID = ALGID_SM4;
+	keyReq.KeyBits = 128;
 	keyReq.BeginTime = timeStamp - 3600;
 	keyReq.EndTime = timeStamp + 3600;
 
@@ -1524,7 +1525,7 @@ int test_negtive()
 	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
 	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
 	keyReq.AlgoID = ALGID_RSA_PUB;
-	keyReq.KeyBits = 256;
+	keyReq.KeyBits = 128;
 	keyReq.BeginTime = timeStamp - 3600;
 	keyReq.EndTime = timeStamp + 3600;
 
@@ -1547,8 +1548,8 @@ int test_negtive()
 	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
 	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
 	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_AES;
-	keyReq.KeyBits = 128;
+	keyReq.AlgoID = ALGID_SM4;
+	keyReq.KeyBits = 1000;
 	keyReq.BeginTime = timeStamp - 3600;
 	keyReq.EndTime = timeStamp + 3600;
 
@@ -1648,9 +1649,11 @@ int test_negtive()
 	// 计算公钥结构指纹
 	SlcSm3((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
 
+#if 0
 	timeStamp = time(NULL);
 	// 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
+#endif
 
 	// 生成云端密钥
 	keyReq.Version = VERSION_CURRENT_VERSION;
@@ -1659,8 +1662,12 @@ int test_negtive()
 	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
 	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
 	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_AES;
-	keyReq.KeyBits = 256;
+	keyReq.AlgoID = ALGID_SM4;
+	keyReq.KeyBits = 128;
+
+	ret = sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &keyReq, sizeof(KEY_REC_REQ)-256, keyReq.Signature);
+	if (ret != 0)
+		return 1;
 
 	// 生成云端密钥
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
@@ -1871,8 +1878,9 @@ int test_negtive()
 			return 1;
 		}
 	}
-
-	for (i = 0; i < sizeof(licReq_Eve); i++)
+	//修改，许可请求签名字段256字节，只有前64字节有效，若修改64字节之后的无效内容不影响签发许可
+	//将sizeof(licReq_Eve)修改为(sizeof(licReq_Eve)-sizeof(licReq_Eve.Signature)+64)
+	for (i = 0; i < (sizeof(licReq_Eve)-sizeof(licReq_Eve.Signature)+64); i++)
 	{
 		// 篡改许可请求任何一个字节，也会导致不可用
 		memcpy(&licReq_Eve, &licReq, sizeof(licReq));
@@ -2081,12 +2089,13 @@ int main()
 	}
 
 	test_positive();
-	getchar();
+	printf("积极测试完成！\n");
 	test_negtive();
-	getchar();
+	printf("消极测试完成！\n");
 
 	CloseDevice();
 	printf("测试完成！\n");
+	getchar();
 
 end:
 
