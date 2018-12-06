@@ -183,7 +183,7 @@ int sm2SignMsg(
 		eckey);
 	if (ret != 1)
 	{
-		cc_error("SM2_digest Failed:0x%08X\n", ret);
+		cc_error("SM2_digest Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -191,7 +191,7 @@ int sm2SignMsg(
 	ret = SM2_sign(1, digest, sizeof(digest), dersig, &dersiglen, eckey);
 	if (ret != 1)
 	{
-		cc_error("SM2_digest Failed:0x%08X\n", ret);
+		cc_error("SM2_digest Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -341,7 +341,7 @@ int initUser(
 	ret = SignUserPubKey(userKey);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -356,7 +356,7 @@ int initUser(
 	ret = GenerateKeyCloud(&keyReq, userKey, cKey);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -367,7 +367,7 @@ int initUser(
 	ret = constructLicReq(&licReq, FatherlicID, userID, fingerprint, KeyID, prikey, prikeylen, pubkey, pubkeylen);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("constructLicReq Failed:0x%08X\n", ret);
+		cc_error("constructLicReq Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -375,7 +375,7 @@ int initUser(
 	ret = issueLicense(cKey, userKey, licID, 0, &licReq, &lic);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -383,7 +383,7 @@ int initUser(
 	ret = GenerateS1(cKey, userKey, &lic, s1_Kc, s1_Ku, &lic);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -486,7 +486,7 @@ int test_positive()
 	////////////////////////////////////////////////////////////////////////
 
 	timeStamp = time(NULL);
-	// 计算公钥结构指纹
+	//1 计算公钥结构指纹
 	SlcSm3((SLC_BYTE *)&userKey_Bob, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
 
 	// 构建云端密钥请求
@@ -496,22 +496,22 @@ int test_positive()
 	ret = GenerateKeyCloud(&keyReq, &userKey_Bob, &key_Alice_new);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 错误的公钥结构指纹
+	//2 错误的公钥结构指纹
 	memset(fingerprint, 0, sizeof(fingerprint));
 
 	timeStamp = time(NULL);
 	// 构建云端密钥请求
 	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
-	// Bob不能生成Alice的云端密钥
+	// 不能生成Alice的云端密钥
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice_new);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 #if 1
@@ -520,62 +520,62 @@ int test_positive()
 	////////////////////////////////////////////////////////////////////////
 
 	timeStamp = time(NULL);
-	// 构建密钥有效期
+	//3 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_OTHER, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
 	// KeyID不匹配
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
 	timeStamp = time(NULL);
-	// 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp-300, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
+	//4 构建密钥有效期
+	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp-301, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
 	//  错误的有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
 	timeStamp = time(NULL);
-	// 构建密钥有效期
+	//5 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp+2, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
 	//  正确的有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
 	timeStamp = time(NULL);
-	// 构建密钥有效期
+	//6 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
 
 	//  Bob不能改Alice的密钥有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Bob, &keyPeriod, &key_Alice_new);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
 	timeStamp = time(NULL);
-	// 构建密钥有效期
+	//7 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
 
 	//  Alice的另一个公钥也不能改Alice的密钥有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice_new, &keyPeriod, &key_Alice_new);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 #endif
@@ -592,20 +592,20 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
 #if 1 // 记录：设置密钥有效期时，可设置将来生效的密钥
 	timeStamp = time(NULL);
-	// 构建密钥有效期
+	//8 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp + 600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
 	//  构建密钥有效期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -613,7 +613,7 @@ int test_positive()
 	ret = GenerateS1(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -621,28 +621,28 @@ int test_positive()
 	ret = convertCipher(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 #endif
 	timeStamp = time(NULL);
-	// 构建密钥有效期
+	//9 构建密钥有效期
 	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp - 60, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 
 	//  密钥已过期
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
 	if (ret != CC_ERROR_SUCCESS)//==改为!=
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-#if 1	// 记录：前面设置有效期时，未设置成功，密钥有效期为原始有效期，即密钥是有效的，能正确通过。
+#if 1	//跟刘跃峰、钟灵剑确认过设置云端密钥有效期为过去的某段时间是可以的
 	//  密钥已过期
 	ret = GenerateS1(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -650,7 +650,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 #endif
@@ -662,11 +662,11 @@ int test_positive()
 	ret = GenerateS1(&key_Alice, &userKey_Alice, NULL, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, NULL);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，次数
+	//10 构建许可条款，次数
 	constructLicLim(&licReq.licLimited, FLAG_TIMES, 0, 0, 0, 1, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对自己授权
@@ -676,7 +676,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -690,7 +690,7 @@ int test_positive()
 	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)//==改为！=
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -700,7 +700,7 @@ int test_positive()
 		return 1;
 	}
 
-	// 构建许可条款，有效期
+	//11 构建许可条款，有效期
 	constructLicLim(&licReq.licLimited, FLAG_SPAN_TIME, 0, 0, 3600, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对自己授权
@@ -710,13 +710,13 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	if (licA2B.licLimited.SpanTime != 3600)  //0改为3600
+	if (licA2B.licLimited.SpanTime != 3600 && licA2B.licLimited.FirstTime != 0)
 	{
-		cc_error("licA2B.licLimited.SpanTime != 3600");
+		cc_error("licA2B.licLimited.SpanTime != 3600 && licA2B.licLimited.FirstTime != 0");
 		return 1;
 	}
 
@@ -724,9 +724,16 @@ int test_positive()
 	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)//==改为!=
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
+
+	if (licA2B.licLimited.FirstTime == 0) 
+	{
+		cc_error("licA2B.licLimited.FirstTime == 0");
+		return 1;
+	}
+
 
 #if 0
 	timeStamp = time(NULL);
@@ -740,35 +747,46 @@ int test_positive()
 	////// 测试 issueLicense
 	////////////////////////////////////////////////////////////////////////
 
-	// 构建许可条款
+	//12 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
+	// 请求时间戳过期，Alice对Bob授权
+	licReq.Version = VERSION_CURRENT_VERSION;
+	memset(licReq.FartherLicID, 0, 16);
+	memcpy(licReq.OwnerUserID, USER_ID_BOB, 16);
+	memcpy(licReq.UserKeyFingerprint, key_Bob.OwnerKeyFingerprint, 32);
+	memcpy(licReq.KeyID, KEY_ID_COMMON, 16);
+	licReq.TimeStamp = time(NULL) -400;
 
-	// 请求时间戳过期
-	licReq.TimeStamp -= 300;
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
-		return 1;
-	}
-
-	// 请求时间戳未到
-	licReq.TimeStamp += 302;
+	sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &licReq, sizeof(LIC_REQ)-256, licReq.Signature);
 
 	// 签发许可
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款,不支持加密
+	//13 请求时间戳未到
+	licReq.Version = VERSION_CURRENT_VERSION;
+	memset(licReq.FartherLicID, 0, 16);
+	memcpy(licReq.OwnerUserID, USER_ID_BOB, 16);
+	memcpy(licReq.UserKeyFingerprint, key_Bob.OwnerKeyFingerprint, 32);
+	memcpy(licReq.KeyID, KEY_ID_COMMON, 16);
+	licReq.TimeStamp = time(NULL) + 400;
+
+	sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &licReq, sizeof(LIC_REQ)-256, licReq.Signature);
+
+	// 签发许可
+	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
+	if (ret == CC_ERROR_SUCCESS)
+	{
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
+		return 1;
+	}
+
+	//14 构建许可条款,不支持加密
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -778,7 +796,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -786,7 +804,7 @@ int test_positive()
 	ret = GenerateS1(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -794,11 +812,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//15 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -808,7 +826,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -830,7 +848,7 @@ int test_positive()
 	ret = GenerateS1(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -838,7 +856,7 @@ int test_positive()
 	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -846,7 +864,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -854,11 +872,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Carol, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob_to_Carol, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// Bob使用Alice的许可给Carol授权
+	//16 Bob使用Alice的许可给Carol授权
 	// 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
 
@@ -869,7 +887,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -891,11 +909,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Carol, &licA2B2C, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob_to_Carol, &licA2B2C);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可
+	//17 构建许可条款，不可继承的许可
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -905,7 +923,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -913,7 +931,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -928,11 +946,11 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，不可解密的许可
+	//18 构建许可条款，不可继承的许可，不可解密的许可
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -942,7 +960,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -950,11 +968,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，次数许可
+	//19 构建许可条款，不可继承的许可，次数许可
 	constructLicLim(&licReq.licLimited, FLAG_TIMES, 0, 0, 0, 1, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -964,7 +982,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -972,7 +990,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -986,11 +1004,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，开始时间未到
+	//20 构建许可条款，不可继承的许可，开始时间未到
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL)+3600, 0, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1000,7 +1018,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1008,11 +1026,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，正常的结束时间
+	//21 构建许可条款，不可继承的许可，正常的结束时间
 	constructLicLim(&licReq.licLimited, FLAG_END_TIME, 0, time(NULL) + 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1022,7 +1040,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1030,11 +1048,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，结束时间已过
+	//22 构建许可条款，不可继承的许可，结束时间已过
 	constructLicLim(&licReq.licLimited, FLAG_END_TIME, 0, time(NULL) - 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1044,7 +1062,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1052,11 +1070,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，正常的可用时间
+	//23 构建许可条款，不可继承的许可，正常的可用时间
 	constructLicLim(&licReq.licLimited, FLAG_SPAN_TIME, 0, 0, 10, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1066,7 +1084,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1080,7 +1098,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1096,11 +1114,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，正常的开始时间和结束时间
+	//24 构建许可条款，不可继承的许可，正常的开始时间和结束时间
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME, time(NULL), time(NULL)+3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1110,7 +1128,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1118,11 +1136,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，正常的开始时间和结束时间，但次数为0
+	//25 构建许可条款，不可继承的许可，正常的开始时间和结束时间，但次数为0
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME | FLAG_TIMES, time(NULL), time(NULL) + 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1132,7 +1150,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1140,11 +1158,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，正常的开始时间和结束时间，但可用时间为0
+	//26 构建许可条款，不可继承的许可，正常的开始时间和结束时间，但可用时间为0
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME | FLAG_SPAN_TIME, time(NULL), time(NULL) + 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1154,7 +1172,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1162,11 +1180,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款，不可继承的许可，4种条件都正常
+	//27 构建许可条款，不可继承的许可，4种条件都正常
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME | FLAG_SPAN_TIME | FLAG_TIMES, time(NULL), time(NULL) + 3600, 1000, 1, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1176,7 +1194,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1184,7 +1202,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1192,11 +1210,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//28 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对自己授权
@@ -1206,7 +1224,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1214,7 +1232,7 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1222,11 +1240,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Alice, NULL, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, NULL);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//29 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1236,11 +1254,11 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//30 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权，由Bob签名
@@ -1250,11 +1268,11 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//31 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权，错误的公钥指纹
@@ -1264,7 +1282,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1272,11 +1290,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//32 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权，错误的用户ID
@@ -1286,7 +1304,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1294,11 +1312,11 @@ int test_positive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//33 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1308,7 +1326,7 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1316,19 +1334,19 @@ int test_positive()
 	ret = convertCipher(&key_Bob, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 没有许可不能转换Alice的S1给Bob
+	//34 没有许可不能转换Alice的S1给Bob
 	ret = convertCipher(&key_Alice, &userKey_Bob, NULL, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, NULL);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 构建许可条款
+	//35 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
 	// 构造许可请求，Alice对Bob授权
@@ -1338,22 +1356,22 @@ int test_positive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// Bob使用Alice的许可做父许可给Bob的密钥授权
+	// Bob使用Alice的许可做父许可给Carol授权
 	// 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
-	// 构造许可请求，Bob使用Alice的许可对Bob密钥给Carol授权
+	// 构造许可请求，Bob使用Alice的许可给Carol授权
 	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
 
 	// 签发许可
 	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1361,18 +1379,18 @@ int test_positive()
 	// 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
-	// 构造许可请求，Bob使用Alice的许可对Bob密钥给Carol授权
+	// 构造许可请求，Carol使用Alice给Bob的许可做父许可给Carol授权
 	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_carol, sizeof(userprikey_carol), userpubkey_carol, sizeof(userpubkey_carol));
 
 	// 签发许可
 	ret = issueLicense(&key_Alice, &userKey_Carol, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 错误的KeyID
+	//36 错误的KeyID
 	// 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
@@ -1380,14 +1398,14 @@ int test_positive()
 	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_OTHER, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
 
 	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
+	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
-	// 错误的FatherLicID
+	//37 错误的FatherLicID
 	// 构建许可条款
 	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
 
@@ -1395,10 +1413,10 @@ int test_positive()
 	constructLicReq(&licReq, LIC_ID_ALICE_TO_CAROL, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
 
 	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
+	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1437,7 +1455,7 @@ int test_negtive()
 	ret = SignUserPubKey(&userKey_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1454,7 +1472,7 @@ int test_negtive()
 	ret = SignUserPubKey(&userKey_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1472,7 +1490,7 @@ int test_negtive()
 	ret = SignUserPubKey(&userKey_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1484,7 +1502,7 @@ int test_negtive()
 	ret = SignUserPubKey(&userKey_Alice);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1513,7 +1531,7 @@ int test_negtive()
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1537,7 +1555,7 @@ int test_negtive()
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1561,7 +1579,7 @@ int test_negtive()
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1575,7 +1593,7 @@ int test_negtive()
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1614,7 +1632,7 @@ int test_negtive()
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1630,7 +1648,7 @@ int test_negtive()
 	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X\n", ret);
+		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1642,7 +1660,7 @@ int test_negtive()
 	ret = SignUserPubKey(&userKey_Alice);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1673,7 +1691,7 @@ int test_negtive()
 	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X\n", ret);
+		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1681,7 +1699,7 @@ int test_negtive()
 	ret = GenerateS1(&key_Alice, &userKey_Alice, NULL, &s1_Kc_Alice, &s1_Ku_Alice, NULL);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1692,7 +1710,7 @@ int test_negtive()
 	ret = constructLicReq(&licReq, FatherlicID, USER_ID_ALICE, fingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("constructLicReq Failed:0x%08X\n", ret);
+		cc_error("constructLicReq Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1700,7 +1718,7 @@ int test_negtive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, licID, 0, &licReq, &lic);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1714,7 +1732,7 @@ int test_negtive()
 		ret = GenerateS1(&key_Alice, &userKey_Eve, &lic, &s1_Kc_Alice, &s1_Ku_Alice, &lic);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("GenerateS1 Failed:0x%08X\n", ret);
+			cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -1729,7 +1747,7 @@ int test_negtive()
 		ret = GenerateS1(&key_Eve, &userKey_Alice, &lic, &s1_Kc_Alice, &s1_Ku_Alice, &lic);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("GenerateS1 Failed:0x%08X\n", ret);
+			cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -1741,7 +1759,7 @@ int test_negtive()
 	ret = SignUserPubKey(&userKey_Bob);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X\n", ret);
+		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1750,7 +1768,7 @@ int test_negtive()
 	ret = GenerateS1(&key_Alice, &userKey_Bob, &lic, &s1_Kc_Alice, &s1_Ku_Alice, &lic);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("GenerateS1 Failed:0x%08X\n", ret);
+		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1823,7 +1841,7 @@ int test_negtive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1839,7 +1857,7 @@ int test_negtive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret == CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1859,7 +1877,7 @@ int test_negtive()
 		ret = issueLicense(&key_Alice, &userKey_Eve, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("issueLicense Failed:0x%08X\n", ret);
+			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -1874,7 +1892,7 @@ int test_negtive()
 		ret = issueLicense(&key_Eve, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("issueLicense Failed:0x%08X\n", ret);
+			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -1890,7 +1908,7 @@ int test_negtive()
 		ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq_Eve, &licA2B);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("issueLicense Failed:0x%08X\n", ret);
+			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -1905,7 +1923,7 @@ int test_negtive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -1926,7 +1944,7 @@ int test_negtive()
 		ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licEve, &licReq, &licA2B2C);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("issueLicense Failed:0x%08X\n", ret);
+			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -1999,7 +2017,7 @@ int test_negtive()
 	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("issueLicense Failed:0x%08X\n", ret);
+		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -2007,7 +2025,7 @@ int test_negtive()
 	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 	if (ret != CC_ERROR_SUCCESS)
 	{
-		cc_error("convertCipher Failed:0x%08X\n", ret);
+		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
@@ -2021,7 +2039,7 @@ int test_negtive()
 		ret = convertCipher(&key_Alice, &userKey_Eve, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("convertCipher Failed:0x%08X\n", ret);
+			cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -2036,7 +2054,7 @@ int test_negtive()
 		ret = convertCipher(&key_Eve, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("convertCipher Failed:0x%08X\n", ret);
+			cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -2051,7 +2069,7 @@ int test_negtive()
 		ret = convertCipher(&key_Alice, &userKey_Bob, &licEve, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
 		if (ret == CC_ERROR_SUCCESS)
 		{
-			cc_error("convertCipher Failed:0x%08X\n", ret);
+			cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
 			return 1;
 		}
 	}
@@ -2088,10 +2106,16 @@ int main()
 		return 1;
 	}
 
-	test_positive();
-	printf("积极测试完成！\n");
-	test_negtive();
-	printf("消极测试完成！\n");
+	if(test_positive())
+		printf("积极测试失败！\n");
+	else
+		printf("积极测试成功！\n");
+	getchar();
+
+	if(test_negtive())
+		printf("消极测试失败！\n");
+	else
+		printf("消极测试成功！\n");
 
 	CloseDevice();
 	printf("测试完成！\n");
