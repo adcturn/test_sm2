@@ -2,69 +2,89 @@
 #include <string.h>
 #include <time.h>
 #include <Windows.h>
-#include "cryptocard.h"
 #include <openssl/bn.h>
 #include <openssl/ec.h>
-#include <openssl/rand.h>
-#include <openssl/err.h>
-#include <openssl/ecdsa.h>
+#include "libsenc.h"
 #include "sm2.h"
-#include "sha256.h"
-#include "sm3.h"
 
-// #pragma comment (lib, "sm2lib.lib")
 
-extern uint8 userpubkey_alice[65];
-extern uint8 userprikey_alice[32];
+/***********************************国密-密钥管理-**********************************/
+/***********************************国密-密钥管理-**********************************/
 
-extern uint8 userpubkey_bob[65];
-extern uint8 userprikey_bob[32];
-
-extern uint8 userpubkey_carol[65];
-extern uint8 userprikey_carol[32];
-
-extern uint8 userpubkey_eve[65];
-extern uint8 userprikey_eve[32];
-
-uint8 USER_ID_NULL[16]  = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8 USER_ID_ALICE[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8 USER_ID_BOB[16]   = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
-uint8 USER_ID_CAROL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
-uint8 USER_ID_EVE[16]   = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3 };
-
-uint8 DEVLP_ID_ALI[8]     = { 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8 DEVLP_ID_TENCENT[8] = { 0, 0, 0, 0, 0, 0, 0, 1 };
-
-uint8 APP_ID_TAOBAO[8]  = { 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8 APP_ID_QQ[8]      = { 0, 0, 0, 0, 0, 0, 0, 1 };
-uint8 APP_ID_WEBCHAT[8] = { 0, 0, 0, 0, 0, 0, 0, 2 };
-
-uint8 KEY_ID_COMMON[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8 KEY_ID_OTHER[16]  = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
-
-uint8 LIC_ID_ALICE_TO_BOB[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-uint8 LIC_ID_ALICE_TO_BOB_TO_CAROL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
-uint8 LIC_ID_ALICE_TO_CAROL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
-
+#define RTC_TIME_PIN_CODE					"\x00\x11\x22\x33\x44\x55\x66\x77" //PIN码
+#define RTC_TIME_PIN_CODE_LEN				8								   //PIN码长度
+#define DEFAULT_SM2_SIGN_USER_ID			"1234567812345678"				   //默认SM2用户ID
+#define DEFAULT_SM2_SIGN_USER_ID_LEN		16								   //默认SM2用户ID长度
 #define cc_error printf
 
-EC_GROUP *group = NULL;
-EC_KEY	*eckey = NULL;
+#define FLAG								0x00000001				//国密-密钥管理新增数据结构标志位，测试用不到
+#define SM2_PUBKEY_LEN						64						//SM2公钥长度
+#define SM2_PRIKEY_LEN						32						//SM2私钥长度
 
-#define DEFAULT_SM2_SIGN_USER_ID			"1234567812345678"
-#define DEFAULT_SM2_SIGN_USER_ID_LEN		16
+//证书路径
+#define	ROOT_CERT_PATH						"./证书/root.cer"		//根证书
+#define	ROOT_PRIKEY_PATH					"./证书/root.pri"		//根私钥
+#define	CA_CERT_PATH						"./证书/ca.cer"			//中级CA证书
+#define	CA_PRIKEY_PATH						"./证书/ca.pri"			//中级CA私钥
+#define	FIRMAIL_CERT_PATH					"./证书/firmail.cer"		//Firmail服务器设备证书
+#define	KEYBAG1_CERT_PATH					"./证书/keybag1.cer"		//keybag1服务器设备证书 对应Dog
+#define	KEYBAG2_CERT_PATH					"./证书/keybag2.cer"		//keybag2服务器设备证书 对应Cat
 
-typedef uint8 SLC_BYTE;
+SENCryptCardList gDevList;											//板卡列表
+HANDLE dHandle;														//板卡句柄
+EC_GROUP *group = NULL;												//SM2签名验签加密用到的变量
+EC_KEY	*eckey = NULL;												//SM2签名验签加密用到的变量
 
-void SlcSm3(uint8 *msg, uint32 msglen, uint8 *digest, uint32 digestbufflen, uint32 *digestlen)
+//证书缓存及长度
+uint8_t cacert[2048] = { 0 };
+uint8_t firmailcert[2048] = { 0 };
+uint8_t keybagDogcert[2048] = { 0 };
+uint8_t keybagCatcert[2048] = { 0 };
+uint32_t ca_certlen = 0;
+uint32_t firmail_certlen = 0;
+uint32_t keybagDog_certlen = 0;
+uint32_t keybagCat_certlen = 0;
+
+//测试数据			在userkey.c中定义
+extern uint8_t pubkey_dog[65];					//keybag_dog SM2公钥
+extern uint8_t prikey_dog[32];					//keybag_dog SM2私钥
+
+extern uint8_t pubkey_cat[65];					//keybag_cat SM2公钥
+extern uint8_t prikey_cat[32];					//keybag_cat SM2私钥
+
+extern uint8_t pubkey_firmail[65];				//firmail SM2公钥
+extern uint8_t prikey_firmail[32];				//firmail SM2私钥
+
+extern uint8_t pubkey_jmj[65];					//加密机 SM2公钥
+extern uint8_t prikey_jmj[32];					//加密机 SM2私钥
+
+extern uint8_t pubkey_AccessCode[65];			//AccessCode SM2公钥  填充作用
+extern uint8_t prikey_AccessCode[32];			//AccessCode SM2私钥  填充作用
+
+uint8_t KEY_BAG_ID_NULL[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t KEY_BAG_ID_DOG[8] = { 0, 0, 0, 0, 0, 0, 0, 1 };
+uint8_t KEY_BAG_ID_CAT[8] = { 0, 0, 0, 0, 0, 0, 0, 2 };
+
+uint8_t KEY_CHAIN_ID_NULL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t KEY_CHAIN_ID_DOG[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+uint8_t KEY_CHAIN_ID_CAT[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+
+uint8_t PHONE_NUMBER_NULL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t PHONE_NUMBER_DOG[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t PHONE_NUMBER_CAT[16] = { 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+uint8_t BIND_CODE_NULL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t BIND_CODE_DOG[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+uint8_t BIND_CODE_CAT[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+
+uint8_t CIRCLE_ID_NULL[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+uint8_t CIRCLE_ID_DOG[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+uint8_t CIRCLE_ID_CAT[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2 };
+
+
+void bn2hex(uint8_t *bin, uint32_t len, char *hex)
 {
-	sm3_ex(msg, msglen, digest);
-	*digestlen = SM3_HASH_SIZE;
-}
-
-void bn2hex(uint8 *bin, uint32 len, char *hex)
-{
-	uint32 i;
+	uint32_t i;
 
 	for (i = 0; i < len; i++)
 	{
@@ -74,6 +94,7 @@ void bn2hex(uint8 *bin, uint32 len, char *hex)
 
 }
 
+//sm2签名编解码使用
 const UINT8 TAG_CLASS_CONTEXT = 0xA0;
 const UINT8 TAG_INTEGER = 0x02;
 const UINT8 TAG_BIT_STRING = 0x03;
@@ -81,6 +102,88 @@ const UINT8 TAG_OCTET_STRING = 0x04;
 const UINT8 TAG_OID = 0x06;
 const UINT8 TAG_SEQUENCE = 0x30;
 
+//*函数：eccDerEncodeSignature
+//*功能：sm2签名Der编码
+//*参数：无
+//*日期：2018/12/14  by ZhangTao
+UINT16 eccDerEncodeSignature(UINT8 *pu8Sig, UINT16 u16SigLen, UINT8 *pu8DerSig, UINT16 *pu16DerSigLen)
+{
+	UINT16 u16Index;
+	UINT16 u16DerSigLen;
+	UINT16 u16RLen, u16SLen;
+	UINT16 i;
+
+	u16RLen = u16SLen = u16SigLen / 2;
+
+	if (pu8Sig[0] & 0x80)
+		u16RLen++;
+
+	i = 0;
+	while ((pu8Sig[i++] == 0) && !(pu8Sig[i] & 0x80))
+		u16RLen--;
+
+	if (pu8Sig[u16SigLen / 2] & 0x80)
+		u16SLen++;
+
+	i = u16SigLen / 2;
+	while ((pu8Sig[i++] == 0) && !(pu8Sig[i] & 0x80))
+		u16SLen--;
+
+	u16DerSigLen = u16RLen + u16SLen + 6;
+
+	if (*pu16DerSigLen < u16DerSigLen)
+	{
+		*pu16DerSigLen = u16DerSigLen;
+		return 1;
+	}
+
+	*pu16DerSigLen = u16DerSigLen;
+
+	// sequence
+	pu8DerSig[0] = TAG_SEQUENCE;
+	pu8DerSig[1] = u16DerSigLen - 2;
+
+	// integer r
+	pu8DerSig[2] = TAG_INTEGER;
+	pu8DerSig[3] = (UINT8)u16RLen;
+
+	u16Index = 4;
+
+	if (pu8Sig[0] & 0x80)
+	{
+		pu8DerSig[4] = 0;
+		u16Index++;
+	}
+
+	memcpy(pu8DerSig + u16Index,
+		pu8Sig + (u16SigLen / 2 > u16RLen ? u16SigLen / 2 - u16RLen : 0),
+		u16SigLen / 2 < u16RLen ? u16SigLen / 2 : u16RLen);
+
+	u16Index += u16SigLen / 2 < u16RLen ? u16SigLen / 2 : u16RLen;
+
+	// integer s
+	pu8DerSig[u16Index] = TAG_INTEGER;
+	pu8DerSig[u16Index + 1] = (UINT8)u16SLen;
+
+	if (pu8Sig[u16SigLen / 2] & 0x80)
+	{
+		pu8DerSig[u16Index + 2] = 0;
+		u16Index++;
+	}
+
+	u16Index += 2;
+
+	memcpy(pu8DerSig + u16Index,
+		pu8Sig + u16SigLen / 2 + (u16SigLen / 2 > u16SLen ? u16SigLen / 2 - u16SLen : 0),
+		u16SigLen / 2 < u16SLen ? u16SigLen / 2 : u16SLen);
+
+	return 0;
+}
+
+//*函数：eccDerDecodeSignature
+//*功能：sm2签名Der解码
+//*参数：无
+//*日期：2018/12/13  by ZhangTao
 UINT16 eccDerDecodeSignature(UINT8 *pu8DerSig, UINT16 u16DerSigLen, UINT8 *pu8Sig, UINT16 u16SigLen)
 {
 	UINT16 u16Index = 0;
@@ -146,14 +249,24 @@ UINT16 eccDerDecodeSignature(UINT8 *pu8DerSig, UINT16 u16DerSigLen, UINT8 *pu8Si
 	return 0;
 }
 
+//*函数：sm2SignMsg
+//*功能：sm2签名
+//*参数：prikey		私钥
+//		 prikeylen	私钥长度
+//		 pubkey		公钥
+//		 pubkeylen	公钥长度
+//		 msg		消息明文
+//		 msglen		消息明文长度
+//		 sig		签名	 
+//*日期：2018/12/13  by ZhangTao
 int sm2SignMsg(
-	uint8 *prikey,
-	uint32 prikeylen,
-	uint8 *pubkey,
-	uint32 pubkeylen,
+	uint8_t *prikey,
+	uint32_t prikeylen,
+	uint8_t *pubkey,
+	uint32_t pubkeylen,
 	void *msg,
-	uint32 msglen,
-	uint8 *sig)
+	uint32_t msglen,
+	uint8_t *sig)
 {
 	int ret;
 	BIGNUM *bnPrikey = NULL;
@@ -162,7 +275,7 @@ int sm2SignMsg(
 	char pkey[131];
 	unsigned char digest[32];
 	unsigned char dersig[256];
-	unsigned int digestlen, dersiglen, siglen;
+	unsigned int digestlen, dersiglen;
 
 	bn2hex(prikey, prikeylen, vkey);
 	bn2hex(pubkey, pubkeylen, pkey);
@@ -172,6 +285,7 @@ int sm2SignMsg(
 	ecPubkey = EC_POINT_hex2point(group, pkey, ecPubkey, NULL);
 	EC_KEY_set_public_key(eckey, ecPubkey);
 
+	//公钥计算摘要
 	digestlen = sizeof(digest);
 	ret = SM2_digest(
 		DEFAULT_SM2_SIGN_USER_ID,
@@ -187,1898 +301,356 @@ int sm2SignMsg(
 		return 1;
 	}
 
+	//私钥签名
 	dersiglen = 256;
 	ret = SM2_sign(1, digest, sizeof(digest), dersig, &dersiglen, eckey);
 	if (ret != 1)
 	{
-		cc_error("SM2_digest Failed:0x%08X,Line:%d\n", ret,__LINE__);
+		cc_error("SM2_sign Failed:0x%08X,Line:%d\n", ret,__LINE__);
 		return 1;
 	}
 
 	ret = eccDerDecodeSignature(dersig, dersiglen, sig, 64);
-	return 0;
-}
 
-int constructUserKey(USER_PUB_KEY *userKey, const uint8 *OwnerID, const uint8 *userpubkey)
-{
-	userKey->Version = VERSION_CURRENT_VERSION;
-	memcpy(userKey->OwnerUserID, OwnerID, 16);
-	userKey->TimeStamp = 0;
-	userKey->AlgoID = ALGID_SM2_PUB;
-	userKey->KeyBits = 256;
-	userKey->KeyLen = 65;
-	memcpy(userKey->KeyValue, userpubkey, 65);
+	//ret = SM2_verify(1, digest, digestlen, dersig, dersiglen, eckey);
+	//if (ret != 1)
+	//{
+	//	cc_error("SM2_verify Failed:0x%08X,Line:%d\n", ret, __LINE__);
+	//	return 1;
+	//}
 
 	return 0;
 }
 
-int constructKeyReq(
-	KEY_REC_REQ *req,
-	const uint8 *KeyID,
-	const uint8 *OwnerID,
-	const uint8 *OwnerKeyID,
-	const uint8 *DevlpID,
-	const uint8 *AppID,
-	int64 timestamp,
-	int64 BeginTime,
-	int64 EndTime,
-	uint8 *prikey,
-	uint32 prikeylen,
-	uint8 *pubkey,
-	uint32 pubkeylen)
-{
-	req->Version = VERSION_CURRENT_VERSION;
-	memcpy(req->KeyID, KeyID, 16);
-	memcpy(req->OwnerUserID, OwnerID, 16);
-	memcpy(req->OwnerKeyFingerprint, OwnerKeyID, 32);
-	memcpy(req->DevlpID, DevlpID, 8);
-	memcpy(req->AppID, AppID, 8);
-	req->timeStamp = timestamp;
-	req->AlgoID = ALGID_SM4;
-	req->KeyBits = 128;
-	req->BeginTime = BeginTime;
-	req->EndTime = EndTime;
-
-	return sm2SignMsg(prikey, prikeylen, pubkey, pubkeylen, req, sizeof(KEY_REC_REQ) - 256, req->Signature);
-}
-
-int constructKeyPeriod(
-	KEY_PERIOD *period,
-	const uint8 *KeyID,
-	int64 TimeStamp,
-	int64 BeginTime,
-	int64 EndTime,
-	uint8 *prikey,
-	uint32 prikeylen,
-	uint8 *pubkey,
-	uint32 pubkeylen)
-{
-	period->Version = VERSION_CURRENT_VERSION;
-	memcpy(period->KeyID, KeyID, 16);
-	period->TimeStamp = TimeStamp;
-	period->BeginTime = BeginTime;
-	period->EndTime = EndTime;
-
-	return sm2SignMsg(prikey, prikeylen, pubkey, pubkeylen, period, sizeof(KEY_PERIOD) - 256, period->Signature);
-}
-
-int constructLicLim(
-	LIC_LIMITED *licLim,
-	uint32 Validity,
-	int64 BeginTime,
-	int64 EndTime,
-	int64 SpanTime,
-	int64 Times,
-	uint32 Policy)
-{
-	licLim->Version = VERSION_CURRENT_VERSION;
-	licLim->Validity = Validity;
-	licLim->BeginTime = BeginTime;
-	licLim->EndTime = EndTime;
-	licLim->FirstTime = 0;
-	licLim->SpanTime = SpanTime;
-	licLim->Times = Times;
-	licLim->Policy = Policy;
-
-	return 0;
-}
-
-int constructLicReq(
-	LIC_REQ *req,
-	uint8 *FartherID,
-	uint8 *UserID,
-	uint8 *UserKeyID,
-	uint8 *KeyID,
-	uint8 *prikey,
-	uint32 prikeylen,
-	uint8 *pubkey,
-	uint32 pubkeylen
-)
-{
-	req->Version = VERSION_CURRENT_VERSION;
-	if (FartherID)
-		memcpy(req->FartherLicID, FartherID, 16);
-	else
-		memset(req->FartherLicID, 0, 16);
-	memcpy(req->OwnerUserID, UserID, 16);
-	memcpy(req->UserKeyFingerprint, UserKeyID, 32);
-	memcpy(req->KeyID, KeyID, 16);
-	req->TimeStamp = time(NULL);
-
-	return sm2SignMsg(prikey, prikeylen, pubkey, pubkeylen, req, sizeof(LIC_REQ) - 256, req->Signature);
-}
-
-int initUser(
-	USER_PUB_KEY *userKey,
-	uint8 *userID,
-	uint8 *userPubKey,
-	KEY_REC *cKey,
-	uint8 *KeyID,
-	uint8 *DevlpID,
-	uint8 *AppID,
-	S1_CIPHER *s1_Kc,
-	S1_CIPHER *s1_Ku,
-	uint8 *prikey,
-	uint32 prikeylen,
-	uint8 *pubkey,
-	uint32 pubkeylen
-)
+//*函数：sm2Verify
+//*功能：sm2验签
+//*参数：pubkey		公钥
+//		 pubkeylen	公钥长度
+//		 msg		消息明文
+//		 msglen		消息明文长度
+//		 sig		签名	 
+//*日期：2018/12/14  by ZhangTao
+int sm2Verify(
+	uint8_t *pubkey,
+	uint32_t pubkeylen,
+	void *msg,
+	uint32_t msglen,
+	uint8_t *sig)
 {
 	int ret;
-	uint32 outlen;
-	uint8 fingerprint[32];
-	KEY_REC_REQ keyReq;
-	uint64 timeStamp;
-	uint8 FatherlicID[16] = { 0 };
-	uint8 licID[16] = { 1 };
-	LIC_REQ licReq;
-	LICENSE lic;
+	EC_POINT *ecPubkey = NULL;
+	char pkey[131];
+	unsigned char digest[32];
+	unsigned char dersig[256];
+	unsigned int digestlen, dersiglen;
 
-	// 构建公钥结构
-	constructUserKey(userKey, userID, userPubKey);
+	//公钥byte数组转hex字符串
+	bn2hex(pubkey, pubkeylen, pkey);
+	//公钥hex字符串转EC_POINT				group是全局变量EC_GROUP
+	ecPubkey = EC_POINT_hex2point(group, pkey, ecPubkey, NULL);
+	//通过EC_POINT设置EC_KEY的公钥          eckey是全局变量EC_KEY
+	EC_KEY_set_public_key(eckey, ecPubkey);
 
-	// 对公钥结构签名（MAC）
-	ret = SignUserPubKey(userKey);
-	if (ret != CC_ERROR_SUCCESS)
+	//计算明文摘要
+	digestlen = sizeof(digest);
+	ret = SM2_digest(
+		DEFAULT_SM2_SIGN_USER_ID,
+		DEFAULT_SM2_SIGN_USER_ID_LEN,
+		msg,
+		msglen,
+		digest,
+		&digestlen,
+		eckey);
+	if (ret != 1)
 	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
+		cc_error("SM2_digest Failed:0x%08X,Line:%d\n", ret, __LINE__);
 		return 1;
 	}
-
-	// 计算公钥结构指纹
-	SlcSm3((SLC_BYTE *)userKey, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
-
-	timeStamp = time(NULL);
-	// 构建云端密钥请求
-	constructKeyReq(&keyReq, KeyID, userID, fingerprint, DevlpID, AppID, timeStamp, timeStamp - 3600, timeStamp + 3600, prikey, prikeylen, pubkey, pubkeylen);
-
-	// 生成云端密钥
-	ret = GenerateKeyCloud(&keyReq, userKey, cKey);
-	if (ret != CC_ERROR_SUCCESS)
+	//sm2签名der编码，验签接口用的是der编码后的签名
+	dersiglen = sizeof(dersig);
+	eccDerEncodeSignature(sig, 64, dersig, (UINT16*)&dersiglen);
+	//验签，返回1成功，返回0失败,第一个参数为类型
+	ret = SM2_verify(1, digest, digestlen, dersig, dersiglen, eckey);
+	if (ret != 1)
 	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
+		cc_error("SM2_verify Failed:0x%08X,Line:%d\n", ret, __LINE__);
 		return 1;
 	}
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, timeStamp - 3600, 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构建许可请求
-	ret = constructLicReq(&licReq, FatherlicID, userID, fingerprint, KeyID, prikey, prikeylen, pubkey, pubkeylen);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("constructLicReq Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 为自己颁发许可
-	ret = issueLicense(cKey, userKey, licID, 0, &licReq, &lic);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 生成S1
-	ret = GenerateS1(cKey, userKey, &lic, s1_Kc, s1_Ku, &lic);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
 	return 0;
 }
 
-int test_positive()
+//*函数：sm2EncMsg
+//*功能：sm加密
+//*参数：pubkey		公钥
+//		 pubkeylen	公钥长度
+//		 msg		消息（明文）
+//		 msglen		消息（明文）长度
+//		 cipher		密文
+//*日期：2018/12/13  by ZhangTao
+int sm2EncMsg(
+	uint8_t *pubkey,
+	uint32_t pubkeylen,
+	void *msg,
+	uint32_t msglen,
+	uint8_t *cipher)
 {
 	int ret;
-	USER_PUB_KEY userKey_Alice, userKey_Bob, userKey_Carol, userKey_Alice_new;
-	KEY_REC key_Alice, key_Bob, key_Carol, key_Alice_new;
-	S1_CIPHER s1_Kc_Alice, s1_Ku_Alice, s1_Kc_Bob, s1_Ku_Bob, s1_Kc_Carol, s1_Ku_Carol, s1_Kc_Alice_by_Bob;
-	S1_CIPHER s1_Ku_Alice_to_Bob, s1_Ku_Alice_to_Bob_to_Carol;
-	LIC_REQ licReq;
-	LICENSE licA2B, licA2B2C;
-	uint32 outlen;
-	uint8 fingerprint[32];
-	KEY_REC_REQ keyReq;
-	KEY_PERIOD keyPeriod;
-	uint64 timeStamp;
-
-	// 初始化Alice的另一个公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Alice_new,
-		USER_ID_ALICE,
-		userpubkey_bob,
-		&key_Alice,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Alice,
-		&s1_Ku_Alice,
-		userprikey_bob,
-		sizeof(userprikey_bob),
-		userpubkey_bob,
-		sizeof(userpubkey_bob)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Alice的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Alice,
-		USER_ID_ALICE,
-		userpubkey_alice,
-		&key_Alice,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Alice,
-		&s1_Ku_Alice,
-		userprikey_alice,
-		sizeof(userprikey_alice),
-		userpubkey_alice,
-		sizeof(userpubkey_alice)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Bob的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Bob,
-		USER_ID_BOB,
-		userpubkey_bob,
-		&key_Bob,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Bob,
-		&s1_Ku_Bob,
-		userprikey_bob,
-		sizeof(userprikey_bob),
-		userpubkey_bob,
-		sizeof(userpubkey_bob)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Carol的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Carol,
-		USER_ID_CAROL,
-		userpubkey_carol,
-		&key_Carol,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Carol,
-		&s1_Ku_Carol,
-		userprikey_carol,
-		sizeof(userprikey_carol),
-		userpubkey_carol,
-		sizeof(userpubkey_carol)
-	);
-	if (ret != 0)
-		return ret;
-
-	////////////////////////////////////////////////////////////////////////
-	////// 测试 GenerateKeyCloud
-	////////////////////////////////////////////////////////////////////////
-
-	timeStamp = time(NULL);
-	//1 计算公钥结构指纹
-	SlcSm3((SLC_BYTE *)&userKey_Bob, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
-
-	// 构建云端密钥请求
-	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	// Bob不能生成Alice的云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Bob, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//2 错误的公钥结构指纹
-	memset(fingerprint, 0, sizeof(fingerprint));
-
-	timeStamp = time(NULL);
-	// 构建云端密钥请求
-	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 不能生成Alice的云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-#if 1
-	////////////////////////////////////////////////////////////////////////
-	////// 测试 SetKeyCloudPeriod
-	////////////////////////////////////////////////////////////////////////
-
-	timeStamp = time(NULL);
-	//3 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_OTHER, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// KeyID不匹配
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	timeStamp = time(NULL);
-	//4 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp-301, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	//  错误的有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	timeStamp = time(NULL);
-	//5 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp+2, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	//  正确的有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	timeStamp = time(NULL);
-	//6 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	//  Bob不能改Alice的密钥有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Bob, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	timeStamp = time(NULL);
-	//7 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	//  Alice的另一个公钥也不能改Alice的密钥有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice_new, &keyPeriod, &key_Alice_new);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-#endif
-	/////////////////////////////////////////////////////////
-	////// 测试密钥有效期对GenerateS1和convertCipher的影响
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对自己授权
-	constructLicReq(&licReq, NULL, USER_ID_ALICE, key_Alice.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-#if 1 // 记录：设置密钥有效期时，可设置将来生效的密钥
-	timeStamp = time(NULL);
-	//8 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp + 600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	//  构建密钥有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//  密钥还没有生效
-	ret = GenerateS1(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 密钥还没有生效
-	ret = convertCipher(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-#endif
-	timeStamp = time(NULL);
-	//9 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp - 60, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	//  密钥已过期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice_new);
-	if (ret != CC_ERROR_SUCCESS)//==改为!=
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-#if 1	//跟刘跃峰、钟灵剑确认过设置云端密钥有效期为过去的某段时间是可以的
-	//  密钥已过期
-	ret = GenerateS1(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 密钥已过期
-	ret = convertCipher(&key_Alice_new, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-#endif
-	////////////////////////////////////////////////////////////////////////
-	////// 测试 GenerateS1
-	////////////////////////////////////////////////////////////////////////
-
-	// 没有许可Alice不可以生成自己的S1
-	ret = GenerateS1(&key_Alice, &userKey_Alice, NULL, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, NULL);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//10 构建许可条款，次数
-	constructLicLim(&licReq.licLimited, FLAG_TIMES, 0, 0, 0, 1, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对自己授权
-	constructLicReq(&licReq, NULL, USER_ID_ALICE, key_Alice.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.Times != 1)
-	{
-		cc_error("licA2B.licLimited.Times != 1");
-		return 1;
-	}
-
-	// 生成自己的S1
-	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)//==改为！=
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.Times != 0)
-	{
-		cc_error("licA2B.licLimited.Times != 1");
-		return 1;
-	}
-
-	//11 构建许可条款，有效期
-	constructLicLim(&licReq.licLimited, FLAG_SPAN_TIME, 0, 0, 3600, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对自己授权
-	constructLicReq(&licReq, NULL, USER_ID_ALICE, key_Alice.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.SpanTime != 3600 && licA2B.licLimited.FirstTime != 0)
-	{
-		cc_error("licA2B.licLimited.SpanTime != 3600 && licA2B.licLimited.FirstTime != 0");
-		return 1;
-	}
-
-	// 生成自己的S1
-	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)//==改为!=
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.FirstTime == 0) 
-	{
-		cc_error("licA2B.licLimited.FirstTime == 0");
-		return 1;
-	}
-
-
-#if 0
-	timeStamp = time(NULL);
-	if (licA2B.licLimited.SpanTime != timeStamp-1 && licA2B.licLimited.SpanTime != timeStamp)
-	{
-		cc_error("licA2B.licLimited.Times != 1");
-		return 1;
-	}
-#endif
-	////////////////////////////////////////////////////////////////////////
-	////// 测试 issueLicense
-	////////////////////////////////////////////////////////////////////////
-
-	//12 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 请求时间戳过期，Alice对Bob授权
-	licReq.Version = VERSION_CURRENT_VERSION;
-	memset(licReq.FartherLicID, 0, 16);
-	memcpy(licReq.OwnerUserID, USER_ID_BOB, 16);
-	memcpy(licReq.UserKeyFingerprint, key_Bob.OwnerKeyFingerprint, 32);
-	memcpy(licReq.KeyID, KEY_ID_COMMON, 16);
-	licReq.TimeStamp = time(NULL) -400;
-
-	sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &licReq, sizeof(LIC_REQ)-256, licReq.Signature);
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//13 请求时间戳未到
-	licReq.Version = VERSION_CURRENT_VERSION;
-	memset(licReq.FartherLicID, 0, 16);
-	memcpy(licReq.OwnerUserID, USER_ID_BOB, 16);
-	memcpy(licReq.UserKeyFingerprint, key_Bob.OwnerKeyFingerprint, 32);
-	memcpy(licReq.KeyID, KEY_ID_COMMON, 16);
-	licReq.TimeStamp = time(NULL) + 400;
-
-	sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &licReq, sizeof(LIC_REQ)-256, licReq.Signature);
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//14 构建许可条款,不支持加密
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Bob不可以生成Alice的S1
-	ret = GenerateS1(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//15 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// issuerID应为Key的OwnerUserID
-	if (memcmp(licA2B.IssuerUserID, key_Alice.OwnerUserID, 16) != 0)
-	{
-		cc_error("licA2B.IssuerID != key_Alice.OwnerID\n");
-		return 1;
-	}
-
-	// FatherLicID应为0
-	if (memcmp(licA2B.FartherLicID, USER_ID_NULL, 16) != 0)
-	{
-		cc_error("licA2B.FartherLicID != USER_ID_NULL\n");
-		return 1;
-	}
-
-	// Bob可以生成Alice的S1了
-	ret = GenerateS1(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Alice不可以用给Bob的许可生成S1
-	ret = GenerateS1(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice_by_Bob, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Alice给Bob的许可不能用于转换给Carol
-	ret = convertCipher(&key_Alice, &userKey_Carol, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob_to_Carol, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//16 Bob使用Alice的许可给Carol授权
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Bob使用Alice的许可对Carol授权
-	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// issuerID应为FatherLic中的UserID
-	if (memcmp(licA2B2C.IssuerUserID, licA2B.OwnerUserID, 16) != 0)
-	{
-		cc_error("licA2B2C.IssuerUserID != licA2B.OwnerUserID\n");
-		return 1;
-	}
-
-	// FatherLicID应为FatherLic中的UserID
-	if (memcmp(licA2B2C.FartherLicID, licA2B.LicID, 16) != 0)
-	{
-		cc_error("licA2B2C.FartherLicID != licA2B.LicID\n");
-		return 1;
-	}
-
-	//  使用Bob转给Carol的许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Carol, &licA2B2C, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob_to_Carol, &licA2B2C);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//17 构建许可条款，不可继承的许可
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Bob使用Alice的许可给Carol授权
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Bob使用Alice的许可对Carol授权
-	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//18 构建许可条款，不可继承的许可，不可解密的许可
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//19 构建许可条款，不可继承的许可，次数许可
-	constructLicLim(&licReq.licLimited, FLAG_TIMES, 0, 0, 0, 1, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.Times != 0)
-	{
-		cc_error("licA2B.licLimited.Times Wrong\n");
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1，没有可用次数了
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//20 构建许可条款，不可继承的许可，开始时间未到
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL)+3600, 0, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//21 构建许可条款，不可继承的许可，正常的结束时间
-	constructLicLim(&licReq.licLimited, FLAG_END_TIME, 0, time(NULL) + 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//22 构建许可条款，不可继承的许可，结束时间已过
-	constructLicLim(&licReq.licLimited, FLAG_END_TIME, 0, time(NULL) - 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//23 构建许可条款，不可继承的许可，正常的可用时间
-	constructLicLim(&licReq.licLimited, FLAG_SPAN_TIME, 0, 0, 10, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.FirstTime != 0)
-	{
-		cc_error("licA2B.licLimited.FirstTime != 0\n");
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	if (licA2B.licLimited.FirstTime == 0)
-	{
-		cc_error("licA2B.licLimited.FirstTime == 0\n");
-		return 1;
-	}
-
-	Sleep(13000);//13改为13000
-
-	// 使用许可转换Alice的S1，许可已失效
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//24 构建许可条款，不可继承的许可，正常的开始时间和结束时间
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME, time(NULL), time(NULL)+3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//25 构建许可条款，不可继承的许可，正常的开始时间和结束时间，但次数为0
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME | FLAG_TIMES, time(NULL), time(NULL) + 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//26 构建许可条款，不可继承的许可，正常的开始时间和结束时间，但可用时间为0
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME | FLAG_SPAN_TIME, time(NULL), time(NULL) + 3600, 0, 0, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//27 构建许可条款，不可继承的许可，4种条件都正常
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME | FLAG_END_TIME | FLAG_SPAN_TIME | FLAG_TIMES, time(NULL), time(NULL) + 3600, 1000, 1, POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1，次数用完了
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//28 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对自己授权
-	constructLicReq(&licReq, NULL, USER_ID_ALICE, key_Alice.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Alice, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Alice没有许可不能转换自己的S1
-	ret = convertCipher(&key_Alice, &userKey_Alice, NULL, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, NULL);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//29 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可，错误的公钥
-	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//30 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权，由Bob签名
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	// 签发许可，非密钥所有者不能直接签发
-	ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//31 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权，错误的公钥指纹
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Alice.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1，许可中的公钥指纹错了，许可无效
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//32 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权，错误的用户ID
-	constructLicReq(&licReq, NULL, USER_ID_CAROL, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1，许可中的用户ID错了，许可无效
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//33 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Alice的许可不能转换Bob的S1
-	ret = convertCipher(&key_Bob, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//34 没有许可不能转换Alice的S1给Bob
-	ret = convertCipher(&key_Alice, &userKey_Bob, NULL, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, NULL);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//35 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Bob使用Alice的许可做父许可给Carol授权
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Bob使用Alice的许可给Carol授权
-	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	// 签发许可
-	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Carol使用Alice给Bob的许可做父许可
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Carol使用Alice给Bob的许可做父许可给Carol授权
-	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_carol, sizeof(userprikey_carol), userpubkey_carol, sizeof(userpubkey_carol));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Carol, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//36 错误的KeyID
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，错误的KeyID
-	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_OTHER, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	// 签发许可
-	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	//37 错误的FatherLicID
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，错误的FatherID
-	constructLicReq(&licReq, LIC_ID_ALICE_TO_CAROL, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	// 签发许可
-	ret = issueLicense(&key_Bob, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licA2B, &licReq, &licA2B2C);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
+	char pkey[131];
+	EC_POINT *ecPubkey = NULL;
+	uint32_t cipherlen;
+
+	//公钥byte数组转hex字符串
+	bn2hex(pubkey, pubkeylen, pkey);
+	//公钥hex字符串转EC_POINT				group是全局变量EC_GROUP
+	ecPubkey = EC_POINT_hex2point(group, pkey, ecPubkey, NULL);
+	//通过EC_POINT设置EC_KEY的公钥          eckey是全局变量EC_KEY
+	EC_KEY_set_public_key(eckey, ecPubkey); 
+
+	//SM2加密
+	ret = SM2_encrypt_with_recommended(cipher, &cipherlen, msg, msglen, eckey);
+	if (ret != 1)
+	{
+		cc_error("SM2_encrypt_with_recommended Failed:0x%08X,Line:%d\n", ret, __LINE__);
 		return 1;
 	}
 
 	return 0;
 }
 
-int test_negtive()
+//*函数：constructKeyChainReq
+//*功能：构造创建keychain请求包
+//*参数：req			keychain创建请求包
+//		 KeyChainID	keychain ID
+//		 ACpubkey	access code 公钥
+//		 ACpubkeylen	access code 公钥长度
+//		 prikey		firmail服务器私钥
+//		 prikeylen	firmail服务器私钥长度
+//		 pubkey		firmail服务器公钥
+//		 pubkeylen	firmail服务器公钥长度
+//*日期：2018/12/13  by ZhangTao
+int constructKeyChainReq(
+	KeychainCreateReq *req,
+	uint8_t *KeyChainID,
+	uint8_t *ACpubkey,
+	uint32_t ACpubkeylen,
+	uint8_t *prikey,
+	uint32_t prikeylen,
+	uint8_t *pubkey,
+	uint32_t pubkeylen)
 {
-	int ret, i;
-	USER_PUB_KEY userKey_Alice, userKey_Bob, userKey_Carol, userKey_Eve;
-	KEY_REC key_Alice, key_Bob, key_Carol, key_Eve;
-	S1_CIPHER s1_Kc_Alice, s1_Ku_Alice, s1_Kc_Bob, s1_Ku_Bob, s1_Kc_Carol, s1_Ku_Carol;
-	S1_CIPHER s1_Ku_Alice_to_Bob;
-	LIC_REQ licReq, licReq_Eve;
-	LICENSE licA2B, licA2B2C, licEve;
-	KEY_REC_REQ keyReq;
-	uint32 outlen;
-	uint8 fingerprint[32];
-	KEY_PERIOD keyPeriod;
-	uint64 timeStamp;
-	uint8 FatherlicID[16] = { 0 };
-	uint8 licID[16] = { 1 };
-	LICENSE lic;
+	req->Magic = MAGIC_DATA;
+	req->Version = VERSION_CURRENT_VERSION;
+	req->Flags = FLAG;//不是加密算法Flag,与加密机无关，随意赋值
+	req->TimeStamp = (uint32_t)time(NULL);
+	memcpy(req->ID, KeyChainID, KEYCHAIN_ID_LEN);
+	memset(req->KeyBagID, 0, KEYBAG_ID_LEN);
+	memcpy(req->AccessCodePubKey, ACpubkey, ACpubkeylen);
 
-	// 1.测试对公钥签名
-	// bad version
-	userKey_Alice.Version = VERSION_CURRENT_VERSION+1;
-	memcpy(userKey_Alice.OwnerUserID, USER_ID_ALICE, 16);
-	userKey_Alice.TimeStamp = 0;
-	userKey_Alice.AlgoID = ALGID_SM2_PUB;
-	userKey_Alice.KeyBits = 256;
-	userKey_Alice.KeyLen = 65;
-	memcpy(userKey_Alice.KeyValue, userpubkey_alice, 65);
+	return sm2SignMsg(prikey, prikeylen, pubkey, pubkeylen, req, sizeof(KeychainCreateReq)-256, req->Signature);
+}
 
-	// 对公钥结构签名（MAC）
-	ret = SignUserPubKey(&userKey_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
+//*函数：constructBindCode
+//*功能：构造绑定验证码数据包
+//*参数：BindCode		绑定验证码数据包
+//		 KeyBagID		keybag ID
+//		 PhoneNumber	电话号码
+//		 BindCode_Plain	绑定验证码明文
+//		 jmjpubkey		机密机公钥
+//		 jmjpubkeylen	机密机公钥长度
+//		 kbprikey		keybag私钥
+//		 kbprikeylen	keybag私钥长度
+//		 kbpubkey		keybag公钥
+//		 kbpubkeylen	keybag公钥长度
+//*日期：2018/12/13  by ZhangTao
+int constructBindCode(
+	KeybagBindCode *BindCode,
+	uint8_t *KeyBagID,
+	uint8_t *PhoneNumber,
+	uint8_t *BindCode_Plain,
+	uint8_t *jmjpubkey,
+	uint32_t jmjpubkeylen,
+	uint8_t *kbprikey,
+	uint32_t kbprikeylen,
+	uint8_t *kbpubkey,
+	uint32_t kbpubkeylen)
+{
+	BindCode->Magic = MAGIC_DATA;
+	BindCode->Version = VERSION_CURRENT_VERSION;
+	BindCode->Flags = FLAG;//不是加密算法Flag,与加密机无关，随意赋值
+	BindCode->TimeStamp = (uint32_t)time(NULL);
+	memcpy(BindCode->KeyBagID, KeyBagID, BINDCODE_PLAIN_LEN);
+	memcpy(BindCode->PhoneNumber, PhoneNumber, PHONE_NUMBER_LEN);
+
+	if (sm2EncMsg(jmjpubkey, jmjpubkeylen, BindCode_Plain, BINDCODE_PLAIN_LEN, BindCode->BindCode))
+		return 1;
+	if (sm2SignMsg(kbprikey, kbprikeylen, kbpubkey, kbpubkeylen, BindCode, sizeof(KeybagBindCode)-256, BindCode->Signature))
+		return 1;
+
+	return 0;
+}
+
+//*函数：constructCircleReq
+//*功能：构造Circle请求包
+//*参数：req				Circle请求包
+//		 KeyBagID		keybag ID
+//		 PhoneNumber	电话号码
+//		 BindCode_Plain	绑定验证码明文
+//		 jmjpubkey		机密机公钥
+//		 jmjpubkeylen	机密机公钥长度
+//		 tbprikey		同步私钥	（keybag)
+//		 tbprikeylen	同步私钥长度（keybag)
+//		 tbpubkey		同步公钥	（keybag)
+//		 tbpubkeylen	同步公钥长度（keybag)
+//*日期：2018/12/13  by ZhangTao
+int constructCircleReq(
+	KeybagCreateCircleReq* req,
+	uint8_t *KeyBagID,
+	uint8_t *PhoneNumber,
+	uint8_t *BindCode_Plain,
+	uint8_t *jmjpubkey,
+	uint32_t jmjpubkeylen,
+	uint8_t *tbprikey,
+	uint32_t tbprikeylen,
+	uint8_t *tbpubkey,
+	uint32_t tbpubkeylen)
+{
+	req->Magic = MAGIC_DATA;
+	req->Version = VERSION_CURRENT_VERSION;
+	req->Flags = FLAG;//不是加密算法Flag,与加密机无关，随意赋值
+	req->TimeStamp = (uint32_t)time(NULL);
+	memcpy(req->KeyBagID, KeyBagID, KEYBAG_ID_LEN);
+	memcpy(req->PhoneNumber, PhoneNumber, PHONE_NUMBER_LEN);
+	memcpy(req->SyncPubKey, tbpubkey+1, SM2_PUBKEY_LEN);
+	if (sm2EncMsg(jmjpubkey, jmjpubkeylen, BindCode_Plain, BINDCODE_PLAIN_LEN, req->BindCode))
+		return 1;
+	if (sm2SignMsg(tbprikey, tbprikeylen, tbpubkey, tbpubkeylen, req, 
+		sizeof(KeybagCreateCircleReq)-sizeof(req->Signature), req->Signature))
+		return 1;
+
+	return 0;
+}
+
+//*函数：constructCircleReq
+//*功能：构造Circle请求包
+//*参数：JCApprove		加入Circle审批包
+//		 KeyBagID		keybag ID
+//		 PhoneNumber	电话号码
+//		 uuid			全球唯一标识符
+//		 BindCode_Plain	绑定验证码明文
+//		 KeyBagIDApprover	审批者keybag ID
+//		 newpubkey		新同步公钥（加入的keybag）
+//		 newpubkeylen	新同步公钥长度（加入的keybag）
+//		 jmjpubkey		机密机公钥
+//		 jmjpubkeylen	机密机公钥长度
+//		 Approverprikey		审批者keybag私钥	（keybag)
+//		 Approverprikeylen	审批者keybag私钥长度（keybag)
+//		 Approverpubkey		审批者keybag公钥	（keybag)
+//		 Approverpubkeylen	审批者keybag公钥长度（keybag)
+//*日期：2018/12/13  by ZhangTao
+int constructJoinCircle(
+	KeybagJoinCircleApprove *JCApprove,
+	uint8_t *KeyBagID,
+	uint8_t *PhoneNumber,
+	uint8_t *uuid,
+	uint8_t *BindCode_Plain,
+	uint8_t *KeyBagIDApprover,
+	uint8_t *newpubkey,
+	uint32_t newpubkeylen,
+	uint8_t *jmjpubkey,
+	uint32_t jmjpubkeylen,
+	uint8_t *Approverprikey,
+	uint32_t Approverprikeylen,
+	uint8_t *Approverpubkey,
+	uint32_t Approverpubkeylen)
+{
+	JCApprove->Magic = MAGIC_DATA;
+	JCApprove->Version = VERSION_CURRENT_VERSION;
+	JCApprove->Flags = FLAG;//不是加密算法Flag,与加密机无关，随意赋值
+	JCApprove->TimeStamp = (uint32_t)time(NULL);
+	memcpy(JCApprove->KeyBagID, KeyBagID, KEYBAG_ID_LEN);
+	memcpy(JCApprove->PhoneNumber, PhoneNumber, PHONE_NUMBER_LEN);
+	memcpy(JCApprove->Uuid, uuid, UUID_LEN);
+	memcpy(JCApprove->SyncPubKey, newpubkey, newpubkeylen);
+	memcpy(JCApprove->KeyBagIDApprover, KeyBagIDApprover, KEYBAG_ID_LEN);
+
+	if (sm2EncMsg(jmjpubkey, jmjpubkeylen, BindCode_Plain, BINDCODE_PLAIN_LEN, JCApprove->BindCode))
+		return 1;
+	if (sm2SignMsg(Approverprikey, Approverprikeylen, Approverpubkey, Approverpubkeylen, JCApprove, 
+		sizeof(KeybagJoinCircleApprove)-sizeof(JCApprove->Signature), JCApprove->Signature))
+		return 1;
+
+	return 0;
+}
+
+
+//*函数：readcert
+//*功能：读取CA证书，Firmail服务器设备证书
+//		 keybag1证书,keybag2证书
+//*参数：无
+//*日期：2018/12/13  by ZhangTao
+int readcert()
+{
+	FILE *fp = NULL;
+	//读取CA证书
+	fp = fopen(CA_CERT_PATH, "rb");
+	if (!fp){
+		printf("打开CA证书失败，Line:%d\n", __LINE__);
 		return 1;
 	}
-
-	// bad AlgoID
-	userKey_Alice.Version = VERSION_CURRENT_VERSION;
-	memcpy(userKey_Alice.OwnerUserID, USER_ID_ALICE, 16);
-	userKey_Alice.TimeStamp = 0;
-	userKey_Alice.AlgoID = ALGID_AES;
-	userKey_Alice.KeyBits = 256;
-	userKey_Alice.KeyLen = 65;
-	memcpy(userKey_Alice.KeyValue, userpubkey_alice, 65);
-
-	// 对公钥结构签名（MAC）
-	ret = SignUserPubKey(&userKey_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
+	ca_certlen = fread(cacert, sizeof(uint8_t), sizeof(cacert), fp);
+	if (!ca_certlen){
+		printf("读取CA证书失败，Line:%d\n", __LINE__);
 		return 1;
 	}
-
-	// bad keybits
-	userKey_Alice.Version = VERSION_CURRENT_VERSION;
-	memcpy(userKey_Alice.OwnerUserID, USER_ID_ALICE, 16);
-	userKey_Alice.TimeStamp = 0;
-	userKey_Alice.AlgoID = ALGID_SM2_PUB;
-	userKey_Alice.KeyBits = 1000;
-	userKey_Alice.KeyLen = 65;
-	memcpy(userKey_Alice.KeyValue, userpubkey_alice, 65);
-
-	// 对公钥结构签名（MAC）
-
-	ret = SignUserPubKey(&userKey_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
+	fclose(fp);
+	//读取FIRMAIL证书
+	fp = fopen(FIRMAIL_CERT_PATH, "rb");
+	if (!fp){
+		printf("打开FIRMAIL证书失败，Line:%d\n", __LINE__);
 		return 1;
 	}
-
-	// 2.测试生成云端密钥
-	// 构建公钥结构
-	constructUserKey(&userKey_Alice, USER_ID_ALICE, userpubkey_alice);
-
-	// 对公钥结构签名（MAC）
-	ret = SignUserPubKey(&userKey_Alice);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
+	firmail_certlen = fread(firmailcert, sizeof(uint8_t), sizeof(firmailcert), fp);
+	if (!firmail_certlen){
+		printf("读取FIRMAIL证书失败，Line:%d\n", __LINE__);
 		return 1;
 	}
-
-	// 计算公钥结构指纹
-	SlcSm3((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
-
-	timeStamp = time(NULL);
+	fclose(fp);
+	//读取keybag1证书
+	fp = fopen(KEYBAG1_CERT_PATH, "rb");
+	if (!fp){
+		printf("打开KEYBAG1证书失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	keybagDog_certlen = fread(keybagDogcert, sizeof(uint8_t), sizeof(keybagDogcert), fp);
+	if (!keybagDog_certlen){
+		printf("读取KEYBAG1证书失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	fclose(fp);
+	//读取keybag1证书
+	fp = fopen(KEYBAG2_CERT_PATH, "rb");
+	if (!fp){
+		printf("打开KEYBAG2证书失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	keybagCat_certlen = fread(keybagCatcert, sizeof(uint8_t), sizeof(keybagCatcert), fp);
+	if (!keybagCat_certlen){
+		printf("读取KEYBAG2证书失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	fclose(fp);
 	
-	// bad version
-	keyReq.Version = VERSION_CURRENT_VERSION + 1;
-	memcpy(keyReq.KeyID, KEY_ID_COMMON, 16);
-	memcpy(keyReq.OwnerUserID, USER_ID_ALICE, 16);
-	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
-	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
-	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_SM4;
-	keyReq.KeyBits = 128;
-	keyReq.BeginTime = timeStamp - 3600;
-	keyReq.EndTime = timeStamp + 3600;
-
-	ret = sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &keyReq, sizeof(KEY_REC_REQ) - 256, keyReq.Signature);
-	if (ret != 0)
-		return 1;
-
-	// 生成云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// bad AlgoID
-	keyReq.Version = VERSION_CURRENT_VERSION;
-	memcpy(keyReq.KeyID, KEY_ID_COMMON, 16);
-	memcpy(keyReq.OwnerUserID, USER_ID_ALICE, 16);
-	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
-	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
-	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_RSA_PUB;
-	keyReq.KeyBits = 128;
-	keyReq.BeginTime = timeStamp - 3600;
-	keyReq.EndTime = timeStamp + 3600;
-
-	ret = sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &keyReq, sizeof(KEY_REC_REQ) - 256, keyReq.Signature);
-	if (ret != 0)
-		return 1;
-
-	// 生成云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// bad KeyBits
-	keyReq.Version = VERSION_CURRENT_VERSION;
-	memcpy(keyReq.KeyID, KEY_ID_COMMON, 16);
-	memcpy(keyReq.OwnerUserID, USER_ID_ALICE, 16);
-	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
-	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
-	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_SM4;
-	keyReq.KeyBits = 1000;
-	keyReq.BeginTime = timeStamp - 3600;
-	keyReq.EndTime = timeStamp + 3600;
-
-	ret = sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &keyReq, sizeof(KEY_REC_REQ) - 256, keyReq.Signature);
-	if (ret != 0)
-		return 1;
-
-	// 生成云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 构建云端密钥请求
-	constructKeyReq(&keyReq, KEY_ID_COMMON, USER_ID_ALICE, fingerprint, DEVLP_ID_ALI, APP_ID_TAOBAO, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// bad signature
-	memset(keyReq.Signature, 0, 256);
-
-	// 生成云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 3.测试设置云端密钥有效期
-	// 初始化Alice的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Alice,
-		USER_ID_ALICE,
-		userpubkey_alice,
-		&key_Alice,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Alice,
-		&s1_Ku_Alice,
-		userprikey_alice,
-		sizeof(userprikey_alice),
-		userpubkey_alice,
-		sizeof(userpubkey_alice)
-	);
-	if (ret != 0)
-		return ret;
-
-	// bad version
-	keyPeriod.Version = VERSION_CURRENT_VERSION + 1;
-	memcpy(keyPeriod.KeyID, KEY_ID_COMMON, 16);
-	keyPeriod.TimeStamp = timeStamp;
-	keyPeriod.BeginTime = timeStamp - 3600;
-	keyPeriod.EndTime = timeStamp + 3600;
-
-	ret = sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &keyPeriod, sizeof(KEY_PERIOD) - 256, keyPeriod.Signature);
-	if (ret != 0)
-		return 1;
-
-	// 设置密钥有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// bad signature
-	keyPeriod.Version = VERSION_CURRENT_VERSION;
-	memcpy(keyPeriod.KeyID, KEY_ID_COMMON, 16);
-	keyPeriod.TimeStamp = timeStamp;
-	keyPeriod.BeginTime = timeStamp - 3600;
-	keyPeriod.EndTime = timeStamp + 3600;
-	memset(keyPeriod.Signature, 0, 256);
-
-	// 设置密钥有效期
-	ret = SetKeyCloudPeriod(&key_Alice, &userKey_Alice, &keyPeriod, &key_Alice);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("SetKeyCloudPeriod Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 4.测试生成S1
-	// 构建公钥结构
-	constructUserKey(&userKey_Alice, USER_ID_ALICE, userpubkey_alice);
-
-	// 对公钥结构签名（MAC）
-	ret = SignUserPubKey(&userKey_Alice);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 计算公钥结构指纹
-	SlcSm3((SLC_BYTE *)&userKey_Alice, sizeof(USER_PUB_KEY), fingerprint, sizeof(fingerprint), &outlen);
-
-#if 0
-	timeStamp = time(NULL);
-	// 构建密钥有效期
-	constructKeyPeriod(&keyPeriod, KEY_ID_COMMON, timeStamp, timeStamp - 3600, timeStamp + 3600, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-#endif
-
-	// 生成云端密钥
-	keyReq.Version = VERSION_CURRENT_VERSION;
-	memcpy(keyReq.KeyID, KEY_ID_COMMON, 16);
-	memcpy(keyReq.OwnerUserID, USER_ID_ALICE, 16);
-	memcpy(keyReq.OwnerKeyFingerprint, fingerprint, 32);
-	memcpy(keyReq.DevlpID, DEVLP_ID_ALI, 8);
-	memcpy(keyReq.AppID, APP_ID_TAOBAO, 8);
-	keyReq.AlgoID = ALGID_SM4;
-	keyReq.KeyBits = 128;
-
-	ret = sm2SignMsg(userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice), &keyReq, sizeof(KEY_REC_REQ)-256, keyReq.Signature);
-	if (ret != 0)
-		return 1;
-
-	// 生成云端密钥
-	ret = GenerateKeyCloud(&keyReq, &userKey_Alice, &key_Alice);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateKeyCloud Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 没有许可不能生成S1
-	ret = GenerateS1(&key_Alice, &userKey_Alice, NULL, &s1_Kc_Alice, &s1_Ku_Alice, NULL);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, timeStamp - 3600, 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_ENCRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构建许可请求
-	ret = constructLicReq(&licReq, FatherlicID, USER_ID_ALICE, fingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("constructLicReq Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 为自己颁发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, licID, 0, &licReq, &lic);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	for (i = 0; i < sizeof(userKey_Eve); i++)
-	{
-		// 篡改用户公钥任何一个字节，都会导致不可用
-		memcpy(&userKey_Eve, &userKey_Alice, sizeof(userKey_Alice));
-		((uint8 *)&userKey_Eve)[i] ++;
-
-		// 生成S1
-		ret = GenerateS1(&key_Alice, &userKey_Eve, &lic, &s1_Kc_Alice, &s1_Ku_Alice, &lic);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	for (i = 0; i < sizeof(key_Eve); i++)
-	{
-		// 篡改云端密钥任何一个字节，也会导致不可用
-		memcpy(&key_Eve, &key_Alice, sizeof(key_Alice));
-		((uint8 *)&key_Eve)[i] ++;
-
-		// 生成S1
-		ret = GenerateS1(&key_Eve, &userKey_Alice, &lic, &s1_Kc_Alice, &s1_Ku_Alice, &lic);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	// 构建公钥结构
-	constructUserKey(&userKey_Bob, USER_ID_BOB, userpubkey_bob);
-
-	// 对公钥结构签名（MAC）
-	ret = SignUserPubKey(&userKey_Bob);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("SignUserPubKey Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 用户公钥和许可不对应
-	// 生成S1
-	ret = GenerateS1(&key_Alice, &userKey_Bob, &lic, &s1_Kc_Alice, &s1_Ku_Alice, &lic);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("GenerateS1 Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 5.测试签发许可
-	// 初始化Alice的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Alice,
-		USER_ID_ALICE,
-		userpubkey_alice,
-		&key_Alice,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Alice,
-		&s1_Ku_Alice,
-		userprikey_alice,
-		sizeof(userprikey_alice),
-		userpubkey_alice,
-		sizeof(userpubkey_alice)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Bob的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Bob,
-		USER_ID_BOB,
-		userpubkey_bob,
-		&key_Bob,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Bob,
-		&s1_Ku_Bob,
-		userprikey_bob,
-		sizeof(userprikey_bob),
-		userpubkey_bob,
-		sizeof(userpubkey_bob)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Carol的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Carol,
-		USER_ID_CAROL,
-		userpubkey_carol,
-		&key_Carol,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Carol,
-		&s1_Ku_Carol,
-		userprikey_carol,
-		sizeof(userprikey_carol),
-		userpubkey_carol,
-		sizeof(userpubkey_carol)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 构建许可条款,bad version
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-	licReq.licLimited.Version++;
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-	// bad version
-	licReq.Version++;
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret == CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	for (i = 0; i < sizeof(userKey_Eve); i++)
-	{
-		// 篡改用户公钥任何一个字节，都会导致不可用
-		memcpy(&userKey_Eve, &userKey_Alice, sizeof(userKey_Alice));
-		((uint8 *)&userKey_Eve)[i] ++;
-
-		// 签发许可
-		ret = issueLicense(&key_Alice, &userKey_Eve, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	for (i = 0; i < sizeof(key_Eve); i++)
-	{
-		// 篡改云端密钥任何一个字节，也会导致不可用
-		memcpy(&key_Eve, &key_Alice, sizeof(key_Alice));
-		((uint8 *)&key_Eve)[i] ++;
-
-		// 签发许可
-		ret = issueLicense(&key_Eve, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-	//修改，许可请求签名字段256字节，只有前64字节有效，若修改64字节之后的无效内容不影响签发许可
-	//将sizeof(licReq_Eve)修改为(sizeof(licReq_Eve)-sizeof(licReq_Eve.Signature)+64)
-	for (i = 0; i < (sizeof(licReq_Eve)-sizeof(licReq_Eve.Signature)+64); i++)
-	{
-		// 篡改许可请求任何一个字节，也会导致不可用
-		memcpy(&licReq_Eve, &licReq, sizeof(licReq));
-		((uint8 *)&licReq_Eve)[i] ++;
-
-		// 签发许可
-		ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq_Eve, &licA2B);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// Bob使用Alice的许可给Carol授权
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Bob使用Alice的许可对Carol授权
-	constructLicReq(&licReq, licA2B.LicID, USER_ID_CAROL, key_Carol.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_bob, sizeof(userprikey_bob), userpubkey_bob, sizeof(userpubkey_bob));
-
-	for (i = 0; i < sizeof(licEve); i++)
-	{
-		// 篡改父许可任何一个字节，也会导致不可用
-		memcpy(&licEve, &licA2B, sizeof(licA2B));
-		((uint8 *)&licEve)[i] ++;
-
-		// 签发许可
-		ret = issueLicense(&key_Alice, &userKey_Bob, LIC_ID_ALICE_TO_BOB_TO_CAROL, &licEve, &licReq, &licA2B2C);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	// 5.测试转换密文
-	// 初始化Alice的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Alice,
-		USER_ID_ALICE,
-		userpubkey_alice,
-		&key_Alice,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Alice,
-		&s1_Ku_Alice,
-		userprikey_alice,
-		sizeof(userprikey_alice),
-		userpubkey_alice,
-		sizeof(userpubkey_alice)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Bob的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Bob,
-		USER_ID_BOB,
-		userpubkey_bob,
-		&key_Bob,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Bob,
-		&s1_Ku_Bob,
-		userprikey_bob,
-		sizeof(userprikey_bob),
-		userpubkey_bob,
-		sizeof(userpubkey_bob)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 初始化Carol的公钥、云端密钥、S1
-	ret = initUser(
-		&userKey_Carol,
-		USER_ID_CAROL,
-		userpubkey_carol,
-		&key_Carol,
-		KEY_ID_COMMON,
-		DEVLP_ID_ALI,
-		APP_ID_TAOBAO,
-		&s1_Kc_Carol,
-		&s1_Ku_Carol,
-		userprikey_carol,
-		sizeof(userprikey_carol),
-		userpubkey_carol,
-		sizeof(userpubkey_carol)
-	);
-	if (ret != 0)
-		return ret;
-
-	// 构建许可条款
-	constructLicLim(&licReq.licLimited, FLAG_START_TIME, time(NULL), 0, 0, 0, POLICY_INHERIT | POLICY_DECRYPT | POLICY_PRINT | POLICY_EXPORT);
-
-	// 构造许可请求，Alice对Bob授权
-	constructLicReq(&licReq, NULL, USER_ID_BOB, key_Bob.OwnerKeyFingerprint, KEY_ID_COMMON, userprikey_alice, sizeof(userprikey_alice), userpubkey_alice, sizeof(userpubkey_alice));
-
-	// 签发许可
-	ret = issueLicense(&key_Alice, &userKey_Alice, LIC_ID_ALICE_TO_BOB, NULL, &licReq, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("issueLicense Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	// 使用许可转换Alice的S1
-	ret = convertCipher(&key_Alice, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-	if (ret != CC_ERROR_SUCCESS)
-	{
-		cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-		return 1;
-	}
-
-	for (i = 0; i < sizeof(userKey_Eve); i++)
-	{
-		// 篡改用户公钥任何一个字节，都会导致不可用
-		memcpy(&userKey_Eve, &userKey_Bob, sizeof(userKey_Bob));
-		((uint8 *)&userKey_Eve)[i] ++;
-
-		// 使用许可转换Alice的S1
-		ret = convertCipher(&key_Alice, &userKey_Eve, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	for (i = 0; i < sizeof(key_Eve); i++)
-	{
-		// 篡改云端密钥任何一个字节，也会导致不可用
-		memcpy(&key_Eve, &key_Alice, sizeof(key_Alice));
-		((uint8 *)&key_Eve)[i] ++;
-
-		// 使用许可转换Alice的S1
-		ret = convertCipher(&key_Eve, &userKey_Bob, &licA2B, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
-	for (i = 0; i < sizeof(licEve); i++)
-	{
-		// 篡改许可任何一个字节，也会导致不可用
-		memcpy(&licEve, &licA2B, sizeof(licA2B));
-		((uint8 *)&licEve)[i] ++;
-
-		// 使用许可转换Alice的S1
-		ret = convertCipher(&key_Alice, &userKey_Bob, &licEve, &s1_Kc_Alice, &s1_Ku_Alice_to_Bob, &licA2B);
-		if (ret == CC_ERROR_SUCCESS)
-		{
-			cc_error("convertCipher Failed:0x%08X,Line:%d\n", ret,__LINE__);
-			return 1;
-		}
-	}
-
 	return 0;
 }
 
-int main()
+//*函数：test_init
+//*功能：测试初始化函数
+//*参数：无
+//*日期：2018/12/18  by ZhangTao
+int test_init()
 {
+	int flag;
+
 	group = SM2_Init();
 	if (group == NULL)
 	{
@@ -2099,35 +671,1095 @@ int main()
 		goto end;
 	}
 
+	//获取设备列表
+	SENC_NewDevList(&gDevList);
+	flag = SENC_GetDevList(&gDevList);
+	if (gDevList.DevNums == 0){
+		printf("未发现加密板卡，Line:%d\n", __LINE__);
+		SENC_FreeDevList(&gDevList);
+		goto end;
+	}
 
-	if (0x00 != OpenDevice())
-	{
-		printf("OpenDevice err\n");
+	//打开设备
+	flag = SENC_Open(gDevList.devs[0], &dHandle);
+	if (flag != SENC_SUCCESS){
+		printf("开启加密板卡失败，错误码为：0x%.8x，Line:%d\n", flag, __LINE__);
+		SENC_FreeDevList(&gDevList);
+		goto end;
+	}
+
+	//设置时间
+	uint64_t rtcTime = time(NULL);
+	flag = SENC_DataProtector_SetRTCTime(dHandle, (uint8_t*)RTC_TIME_PIN_CODE, RTC_TIME_PIN_CODE_LEN, &rtcTime);
+	if (flag != SENC_SUCCESS){
+		printf("设置RTC时间失败，错误码为：0x%.8x，Line:%d\n", flag, __LINE__);
+		SENC_FreeDevList(&gDevList);
+		goto end;
+	}
+
+	//获取时间
+	rtcTime = time(NULL);
+	uint64_t rtcTime2 = 0;
+	flag = SENC_DataProtector_GetRTCTime(dHandle, &rtcTime2);
+	if (flag != SENC_SUCCESS){
+		printf("获取RTC时间失败，错误码为：0x%.8x，Line:%d\n", flag, __LINE__);
+		SENC_FreeDevList(&gDevList);
+		goto end;
+	}
+
+	//读取证书
+	if (readcert()){
+		printf("读取证书失败！\n");
+		goto end;
+	}
+	printf("读取证书成功！\n");
+
+	return 0;
+
+end:
+	return 1;
+}
+
+//*函数：test_keymanage_all
+//*功能：密钥管理新增业务接口整体流程测试
+//*参数：无
+//*日期：2018/12/17  by ZhangTao
+int test_keymanage_all()
+{
+	int ret;
+	KeychainCreateReq KCCreateReq_Dog;
+	KeychainCreateCode KCCreateCode_Dog;
+	KeybagBindCode  KBBindCode_Dog, KBBindCode_Cat;
+	uint8_t bindcode_plain_Dog[BINDCODE_PLAIN_LEN], bindcode_plain_Cat[BINDCODE_PLAIN_LEN];
+	uint8_t phonenum_Dog[PHONE_NUMBER_LEN], phonenum_Cat[PHONE_NUMBER_LEN];
+	uint8_t bindcodeVeriCipher_Dog[256], bindcodeVeriCipher_Cat[256];
+	KeybagCreateCircleReq KBCreateCirReq_Dog;
+	KeybagCircle KBCircle_Dog, KBCircle_Cat, KBCircleCommon;
+	KeybagJoinCircleApprove KBJoinCir_DogApproveCat;
+	uint32_t len1;
+	uint32_t Dogverilen, Catverilen;
+	uint32_t DogCirclelen;
+	uint32_t timestamp1, timestamp2;
+
+	KBCircle_Dog.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+	KBCircle_Cat.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+	KBCircleCommon.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+
+	//1 创建KeyChain
+	//构造KeyChain创建请求
+	constructKeyChainReq(&KCCreateReq_Dog, KEY_CHAIN_ID_DOG, pubkey_AccessCode + 1, SM2_PUBKEY_LEN, prikey_firmail, 
+						  SM2_PRIKEY_LEN, pubkey_firmail, SM2_PUBKEY_LEN + 1);
+	//创建KeyChain
+	ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReq_Dog, sizeof(KCCreateReq_Dog), cacert, ca_certlen, firmailcert, 
+										 firmail_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+	if (ret != SENC_SUCCESS){//预期KeyChain创建成功
+		cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//验签KeyChainCreateCode
+	ret = sm2Verify(pubkey_jmj, SM2_PUBKEY_LEN + 1, &KCCreateCode_Dog, 
+		sizeof(KCCreateCode_Dog)-sizeof(KCCreateCode_Dog.Signature), KCCreateCode_Dog.Signature);
+	if (ret){
+		cc_error("KeyChainCreateCode SM2_Verify Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	
+	//2 创建Circle
+	//构造绑定验证码    Dog创建Circle的绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1, 
+						prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert, 
+								   keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//检查绑定验证码中的电话号码与返回的电话号码是否一致
+	if (memcmp(PHONE_NUMBER_DOG, phonenum_Dog, PHONE_NUMBER_LEN)){
+		cc_error("PhoneNumber Error,Line:%d\n",__LINE__);
+		return 1;
+	}
+	//检查绑定验证码中的绑定验证码明文与返回的绑定验证码明文是否一致
+	if (memcmp(BIND_CODE_DOG, bindcode_plain_Dog, BINDCODE_PLAIN_LEN)){
+		cc_error("BindCodePlain Error,Line:%d\n", __LINE__);
 		return 1;
 	}
 
-	if(test_positive())
-		printf("积极测试失败！\n");
-	else
-		printf("积极测试成功！\n");
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+						pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog), bindcodeVeriCipher_Dog, 
+									   Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//验签Circle
+	uint8_t msg[256] = { 0 };
+	uint32_t msglen = 0;
+	memcpy(msg, &KBCircle_Dog, 52);
+	msglen += 52;
+	memcpy(msg + msglen, KBCircle_Dog.kcPubKey, sizeof(KeybagCirclePubkey));
+	msglen += sizeof(KeybagCirclePubkey);
+	ret = sm2Verify(pubkey_jmj, SM2_PUBKEY_LEN + 1, msg, msglen, KBCircle_Dog.Signature);
+	if (ret){
+		cc_error("KeyChainCreateCode SM2_Verify Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//检查Circle请求包中的电话号码与Circle包中的电话号码是否一致
+	if (memcmp(PHONE_NUMBER_DOG, KBCircle_Dog.PhoneNumber, PHONE_NUMBER_LEN)){
+		cc_error("PhoneNumber Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//检查Circle包的KeyBag公钥数组中是否只有一个KeyBag的公钥信息
+	if (KBCircle_Dog.Count != 1){
+		cc_error("KeyBag PubKey Count Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断Circle包的公钥数组中仅有的一个公钥信息中的KeyBagID是否与KeyBagDog的ID相等
+	if (memcmp(KEY_BAG_ID_DOG, KBCircle_Dog.kcPubKey[0].KeyBagID, KEYBAG_ID_LEN)){
+		cc_error("KeyBag ID Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断公钥数组中仅有的一个公钥信息中的同步公钥是否与KeyBagDog的同步公钥相等
+	if (memcmp(pubkey_dog + 1, KBCircle_Dog.kcPubKey[0].SyncPubKey, SM2_PUBKEY_LEN)){
+		cc_error("SyncPubKey Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断公钥数据中仅有的一个公钥信息中的Seq是否为1
+	if (KBCircle_Dog.kcPubKey[0].KeyBagSeq != 1){
+		cc_error("KeyBagSeq Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+
+	//加入Circle
+	//构造绑定验证码    Cat加入Dog的Circle的绑定验证码
+	constructBindCode(&KBBindCode_Cat, KEY_BAG_ID_CAT, PHONE_NUMBER_CAT, BIND_CODE_CAT, pubkey_jmj, SM2_PUBKEY_LEN + 1, 
+						prikey_cat, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Cat, sizeof(KBBindCode_Cat), cacert, ca_certlen, keybagCatcert, 
+								   keybagCat_certlen, bindcode_plain_Cat, phonenum_Cat, bindcodeVeriCipher_Cat, &Catverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat, 
+	KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1,prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat), 
+									 bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期加入Circle成功
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//检查加入Circle请求包中的电话号码与新的Circle包中的电话号码是否一致
+	if (memcmp(PHONE_NUMBER_DOG, KBCircle_Dog.PhoneNumber, PHONE_NUMBER_LEN)){
+		cc_error("PhoneNumber Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//检查新的Circle包的KeyBag公钥数组中是否有2个KeyBag的公钥信息
+	if (KBCircle_Dog.Count != 2){
+		cc_error("KeyBag PubKey Count Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断新的Circle包的公钥数组第一个公钥信息中的KeyBagID是否与KeyBagDog的ID相等
+	if (memcmp(KEY_BAG_ID_DOG, KBCircle_Dog.kcPubKey[0].KeyBagID, KEYBAG_ID_LEN)){
+		cc_error("KeyBag ID Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断新的Circle包的公钥数组第一个公钥信息中的同步公钥是否与KeyBagDog的同步公钥相等
+	if (memcmp(pubkey_dog + 1, KBCircle_Dog.kcPubKey[0].SyncPubKey, SM2_PUBKEY_LEN)){
+		cc_error("SyncPubKey Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断新的Circle包的公钥数组第一个公钥信息中的Seq是否为1
+	if (KBCircle_Dog.kcPubKey[0].KeyBagSeq != 1){
+		cc_error("KeyBagSeq Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断新的Circle包的公钥数组第一个公钥信息中的KeyBagID是否与KeyBagDog的ID相等
+	if (memcmp(KEY_BAG_ID_CAT, KBCircle_Dog.kcPubKey[1].KeyBagID, KEYBAG_ID_LEN)){
+		cc_error("KeyBag ID Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断新的Circle包的公钥数组第一个公钥信息中的同步公钥是否与KeyBagDog的同步公钥相等
+	if (memcmp(pubkey_cat + 1, KBCircle_Dog.kcPubKey[1].SyncPubKey, SM2_PUBKEY_LEN)){
+		cc_error("SyncPubKey Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+	//判断新的Circle包的公钥数组第一个公钥信息中的Seq是否为1
+	if (KBCircle_Dog.kcPubKey[1].KeyBagSeq != 2){
+		cc_error("KeyBagSeq Error,Line:%d\n", __LINE__);
+		return 1;
+	}
+
+	free(KBCircle_Dog.kcPubKey);
+	free(KBCircle_Cat.kcPubKey);
+	free(KBCircleCommon.kcPubKey);
+	return 0;
+}
+
+//*函数：test_keymanage_positive
+//*功能：密钥管理新增业务接口积极测试
+//*参数：无
+//*日期：2018/12/14  by ZhangTao
+int test_keymanage_positive()
+{
+	int ret;
+	KeychainCreateReq KCCreateReq_Dog;
+	KeychainCreateCode KCCreateCode_Dog;
+	KeybagBindCode  KBBindCode_Dog, KBBindCode_Cat;
+	uint8_t bindcode_plain_Dog[BINDCODE_PLAIN_LEN], bindcode_plain_Cat[BINDCODE_PLAIN_LEN];
+	uint8_t phonenum_Dog[PHONE_NUMBER_LEN], phonenum_Cat[PHONE_NUMBER_LEN];
+	uint8_t bindcodeVeriCipher_Dog[256], bindcodeVeriCipher_Cat[256];
+	KeybagCreateCircleReq KBCreateCirReq_Dog;
+	KeybagCircle KBCircle_Dog, KBCircle_Cat, KBCircleCommon;
+	KeybagJoinCircleApprove KBJoinCir_DogApproveCat;
+	uint32_t len1;
+	uint32_t Dogverilen, Catverilen;
+	uint32_t DogCirclelen;
+	uint32_t timestamp1, timestamp2;
+
+	KBCircle_Dog.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+	KBCircle_Cat.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+	KBCircleCommon.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+
+	////////////////////////////////////////////////////////////////////////
+	////// 测试 创建KeyChain
+	////////////////////////////////////////////////////////////////////////
+#pragma region
+	//1 正确的KeyChain创建请求
+	//构造KeyChain创建请求
+	constructKeyChainReq(&KCCreateReq_Dog, KEY_CHAIN_ID_DOG, pubkey_AccessCode + 1, SM2_PUBKEY_LEN, prikey_firmail,
+		SM2_PRIKEY_LEN, pubkey_firmail, SM2_PUBKEY_LEN + 1);
+	//创建KeyChain
+	int lentemp = sizeof(KCCreateReq_Dog);
+	ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReq_Dog, sizeof(KCCreateReq_Dog), cacert, ca_certlen,
+		firmailcert, firmail_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+	if (ret != SENC_SUCCESS){//预期KeyChain创建成功
+		cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//2 使用错误的firmail服务器私钥签名KeyChain创建请求包
+	//构造KeyChain创建请求
+	constructKeyChainReq(&KCCreateReq_Dog, KEY_CHAIN_ID_DOG, pubkey_AccessCode + 1, SM2_PUBKEY_LEN, prikey_jmj,
+		SM2_PRIKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1);
+	//创建KeyChain
+	ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReq_Dog, sizeof(KCCreateReq_Dog), cacert, ca_certlen,
+		firmailcert, firmail_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+	if (ret == SENC_SUCCESS){//预期KeyChain创建失败
+		cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//3 错误的firmail服务器证书
+	//构造KeyChain创建请求
+	constructKeyChainReq(&KCCreateReq_Dog, KEY_CHAIN_ID_DOG, pubkey_AccessCode + 1, SM2_PUBKEY_LEN, prikey_firmail,
+		SM2_PRIKEY_LEN, pubkey_firmail, SM2_PUBKEY_LEN + 1);
+	//创建KeyChain
+	ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReq_Dog, sizeof(KCCreateReq_Dog), cacert, ca_certlen,
+		keybagDogcert, keybagDog_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+	if (ret == SENC_SUCCESS){//预期KeyChain创建失败
+		cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+#pragma endregion
+
+	////////////////////////////////////////////////////////////////////////
+	////// 测试 签发绑定验证码
+	////////////////////////////////////////////////////////////////////////
+#pragma region
+	//4 正确地签发BindCode
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//5 使用错误的电话号码签发KeyBind
+	//构造绑定验证码                                   错误的电话号码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_CAT, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//6 使用错误的加密板卡证书加密BindCode明文
+	//构造绑定验证码																	错误的加密板卡证书
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_firmail, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret == SENC_SUCCESS){//预期签发绑定验证码失败
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//7 使用错误的keybag私钥签名
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_cat, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);//错误的keybag私钥
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret == SENC_SUCCESS){//预期签发绑定验证码失败
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//8 使用错误的keybag证书
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码																					错误的keybag证书
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagCatcert,
+		keybagCat_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret == SENC_SUCCESS){//预期签发绑定验证码失败
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+#pragma endregion
+
+	////////////////////////////////////////////////////////////////////////
+	////// 测试 创建Circle
+	////////////////////////////////////////////////////////////////////////
+#pragma region
+	//9 正确地创建Circle
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//10 使用错误的验证码
+	//构造创建Circle请求包													  错误的绑定验证码
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_CAT,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期创建Circle失败
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//11 使用错误的keybag公钥
+	//构造创建Circle请求包													  
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);//错误的keybag公钥
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期创建Circle失败
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//12 使用错误的keybag私钥签名
+	//构造创建Circle请求包													  
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_cat, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);//错误的keybag私钥
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期创建Circle失败
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//13 使用错误的电话号码
+	//构造创建Circle请求包									错误的电话号码
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_CAT, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//14 使用错误的keybagID
+	//构造创建Circle请求包					错误的keybagID
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_CAT, PHONE_NUMBER_CAT, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+#pragma endregion
+
+	////////////////////////////////////////////////////////////////////////
+	////// 测试 加入Circle
+	////////////////////////////////////////////////////////////////////////
+#pragma region
+	//15 正确地加入Circle    Cat加入Dog的Circle
+	//构造绑定验证码    Dog创建Circle的绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog), bindcodeVeriCipher_Dog,
+		Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造绑定验证码    Cat加入Dog的Circle的绑定验证码
+	constructBindCode(&KBBindCode_Cat, KEY_BAG_ID_CAT, PHONE_NUMBER_CAT, BIND_CODE_CAT, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_cat, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Cat, sizeof(KBBindCode_Cat), cacert, ca_certlen, keybagCatcert,
+		keybagCat_certlen, bindcode_plain_Cat, phonenum_Cat, bindcodeVeriCipher_Cat, &Catverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期加入Circle成功
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//16 使用错误的验证码
+	//构造加入Circle审批包																			   错误的绑定验证码
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, BIND_CODE_NULL,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//17 Cat伪造Dog的电话号码
+	//构造加入Circle审批包										  错误的电话号码
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_CAT, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//18 Cat伪造Dog的KeyBagID
+	//构造加入Circle审批包										  
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_CAT, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1,//错误的KeyBagID
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//19 Cat伪造Dog的私钥进行签名
+	//构造加入Circle审批包										  
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_cat, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);//错误的私钥
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//20 创建Circle预留KeyBagID错误对加入Circle的影响
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_NULL, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog), bindcodeVeriCipher_Dog,
+		Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//21 创建Circle预留电话错误对加入Circle的影响
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_NULL, PHONE_NUMBER_NULL, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog), bindcodeVeriCipher_Dog,
+		Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+#pragma endregion
+
+	free(KBCircle_Dog.kcPubKey);
+	free(KBCircle_Cat.kcPubKey);
+	free(KBCircleCommon.kcPubKey);
+	return 0;
+}
+
+//*函数：test_keymanage_negative
+//*功能：密钥管理新增业务接口消极测试
+//*参数：无
+//*日期：2018/12/13  by ZhangTao
+int test_keymanage_negative()
+{
+	int ret, i;
+	KeychainCreateReq KCCreateReq_Dog, KCCreateReqCommon;
+	KeychainCreateCode KCCreateCode_Dog;
+	KeybagBindCode  KBBindCode_Dog, KBBindCode_Cat, KBBindCodeCommon;
+	uint8_t bindcode_plain_Dog[BINDCODE_PLAIN_LEN], bindcode_plain_Cat[BINDCODE_PLAIN_LEN];
+	uint8_t phonenum_Dog[PHONE_NUMBER_LEN], phonenum_Cat[PHONE_NUMBER_LEN];
+	uint8_t bindcodeVeriCipher_Dog[256], bindcodeVeriCipher_Cat[256];
+	KeybagCreateCircleReq KBCreateCirReq_Dog,KBCreateCirReqCommon;
+	KeybagCircle KBCircle_Dog, KBCircle_Cat, KBCircleCommon;
+	KeybagJoinCircleApprove KBJoinCir_DogApproveCat, KBJoinCirApproveCommon;
+	uint32_t len1;
+	uint32_t Dogverilen, Catverilen;
+	uint32_t DogCirclelen;
+	uint32_t timestamp1, timestamp2;
+
+	KBCircle_Dog.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+	KBCircle_Cat.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+	KBCircleCommon.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 3);
+
+#pragma region 测试创建KeyChain
+	//A.测试创建KeyChain
+	//1 bad version
+	//构造KeyChain创建请求，使用错误的版本号
+	KCCreateReq_Dog.Magic = MAGIC_DATA;
+	KCCreateReq_Dog.Version = VERSION_CURRENT_VERSION + 1;//错误的版本号
+	KCCreateReq_Dog.Flags = FLAG;//不是加密算法Flag,与加密机无关，随意赋值
+	KCCreateReq_Dog.TimeStamp = (uint32_t)time(NULL);
+	memcpy(KCCreateReq_Dog.ID, KEY_CHAIN_ID_DOG, KEYCHAIN_ID_LEN);
+	memset(KCCreateReq_Dog.KeyBagID, 0, KEYBAG_ID_LEN);
+	memcpy(KCCreateReq_Dog.AccessCodePubKey, pubkey_AccessCode + 1, SM2_PUBKEY_LEN);
+
+	//firmail服务器私钥签名
+	ret = sm2SignMsg(prikey_firmail, SM2_PRIKEY_LEN, pubkey_firmail, SM2_PUBKEY_LEN + 1, &KCCreateReq_Dog,
+		sizeof(KeychainCreateReq)-256, KCCreateReq_Dog.Signature);
+	if (ret != 0){
+		cc_error("SM2签名失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	//创建KeyChain
+	ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReq_Dog, sizeof(KCCreateReq_Dog), cacert, ca_certlen,
+		firmailcert, firmail_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+	if (ret == SENC_SUCCESS){//预期KeyChain创建失败
+		cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//2 bad signature
+	//构造KeyChain创建请求
+	constructKeyChainReq(&KCCreateReq_Dog, KEY_CHAIN_ID_DOG, pubkey_AccessCode + 1, SM2_PUBKEY_LEN, prikey_firmail,
+		SM2_PRIKEY_LEN, pubkey_firmail, SM2_PUBKEY_LEN + 1);
+	//篡改签名
+	memset(KCCreateReq_Dog.Signature, 0, sizeof(KCCreateReq_Dog.Signature));
+	//创建KeyChain
+	ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReq_Dog, sizeof(KCCreateReq_Dog), cacert, ca_certlen,
+		firmailcert, firmail_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+	if (ret == SENC_SUCCESS){//预期KeyChain创建失败
+		cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//3 bad keychain req packet
+	//构造KeyChain创建请求
+	constructKeyChainReq(&KCCreateReq_Dog, KEY_CHAIN_ID_DOG, pubkey_AccessCode + 1, SM2_PUBKEY_LEN, prikey_firmail,
+		SM2_PRIKEY_LEN, pubkey_firmail, SM2_PUBKEY_LEN + 1);
+	//篡改签名的请求包的任一字节
+	for (i = 0; i < (sizeof(KCCreateReq_Dog)-sizeof(KCCreateReq_Dog.Signature) + 64); i++)
+	{
+		memcpy(&KCCreateReqCommon, &KCCreateReq_Dog, sizeof(KCCreateReq_Dog));
+		((uint8_t *)&KCCreateReqCommon)[i] ++;
+
+		//创建KeyChain
+		ret = SENC_KeyManager_CreateKeyChain(dHandle, KCCreateReqCommon, sizeof(KCCreateReqCommon), cacert, ca_certlen,
+			firmailcert, firmail_certlen, KEY_BAG_ID_DOG, &KCCreateCode_Dog, &len1);
+		if (ret == SENC_SUCCESS){//预期KeyChain创建失败
+			cc_error("CreateKeyChain Failed:0x%08X,Line:%d\n", ret, __LINE__);
+			return 1;
+		}
+	}
+#pragma endregion
+
+#pragma region 测试签发绑定验证码
+	//B 测试签发绑定验证码
+	//4 bad version
+	//构造绑定验证码，使用错误的版本号
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	KBBindCode_Dog.Version = VERSION_CURRENT_VERSION + 1;
+	//dog私钥重新签名
+	ret = sm2SignMsg(prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1, &KBBindCode_Dog,
+		sizeof(KBBindCode_Dog)-256, KBBindCode_Dog.Signature);
+	if (ret != 0){
+		cc_error("SM2签名失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret == SENC_SUCCESS){//预期签发绑定验证码失败
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//5 bad signature
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//篡改签名
+	memset(KBBindCode_Dog.Signature, 0, sizeof(KBBindCode_Dog.Signature));
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret == SENC_SUCCESS){//预期签发绑定验证码失败
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//6 bad bindcode packet
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//篡改绑定验证码包的任一字节
+	for (i = 0; i < (sizeof(KBBindCode_Dog)-sizeof(KBBindCode_Dog.Signature) + 64); i++)
+	{
+		memcpy(&KBBindCodeCommon, &KBBindCode_Dog, sizeof(KBBindCode_Dog));
+		((uint8_t *)&KBBindCodeCommon)[i] ++;
+
+		//签发绑定验证码
+		ret = SENC_KeyManager_BindCode(dHandle, KBBindCodeCommon, sizeof(KBBindCodeCommon), cacert, ca_certlen, keybagDogcert,
+			keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+		if (ret == SENC_SUCCESS){//预期签发绑定验证码失败
+			cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+			return 1;
+		}
+	}
+#pragma endregion 
+
+#pragma region  测试创建Circle
+	//C 测试创建Circle
+	//7 bad version
+	//构造绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造创建Circle请求包   错误的版本号
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	KBCreateCirReq_Dog.Version = VERSION_CURRENT_VERSION + 1;
+
+	//dog私钥重新签名
+	ret = sm2SignMsg(prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1, &KBCreateCirReq_Dog,
+		sizeof(KBCreateCirReq_Dog)-256, KBCreateCirReq_Dog.Signature);
+	if (ret != 0){
+		cc_error("SM2签名失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期创建Circle失败
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//8 bad bindcode
+	//构造创建Circle请求包,错误的绑定验证码，							应该为bindcode_plain_Dog
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Cat,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期创建Circle失败
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//9 bad signature
+	//构造创建Circle请求包,错误的签名
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	memset(KBCreateCirReq_Dog.Signature, 0, sizeof(KBCreateCirReq_Dog.Signature));
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog),
+		bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期创建Circle失败
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//10 bad circle req packet
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//篡改Circle请求包的任一字节
+	for (i = 0; i < (sizeof(KBCreateCirReq_Dog)-sizeof(KBCreateCirReq_Dog.Signature) + 64); i++)
+	{
+		memcpy(&KBCreateCirReqCommon, &KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog));
+		((uint8_t *)&KBCreateCirReqCommon)[i] ++;
+
+		//创建Circle
+		ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReqCommon, sizeof(KBCreateCirReqCommon),
+			bindcodeVeriCipher_Dog, Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+		if (ret == SENC_SUCCESS){//预期创建Circle失败
+			cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+			return 1;
+		}
+	}
+#pragma endregion
+
+#pragma region  测试加入Circle
+	//D 测试加入Circle
+	//11 bad version
+	//构造绑定验证码    Dog创建Circle的绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog), bindcodeVeriCipher_Dog,
+		Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造绑定验证码    Cat加入Dog的Circle的绑定验证码
+	constructBindCode(&KBBindCode_Cat, KEY_BAG_ID_CAT, PHONE_NUMBER_CAT, BIND_CODE_CAT, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_cat, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Cat, sizeof(KBBindCode_Cat), cacert, ca_certlen, keybagCatcert,
+		keybagCat_certlen, bindcode_plain_Cat, phonenum_Cat, bindcodeVeriCipher_Cat, &Catverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//错误的版本号 
+	KBJoinCir_DogApproveCat.Version += 1;
+	//KeyBagDog的私钥重新签名JoinCircle请求包
+	ret = sm2SignMsg(prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1, &KBJoinCir_DogApproveCat,
+		sizeof(KBJoinCir_DogApproveCat)-256, KBJoinCir_DogApproveCat.Signature);
+	if (ret != 0){
+		cc_error("SM2签名失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//12 bad phonenumber
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//错误的电话号码
+	memcpy(KBJoinCir_DogApproveCat.PhoneNumber, PHONE_NUMBER_CAT, PHONE_NUMBER_LEN);
+	//KeyBagDog的私钥重新签名JoinCircle请求包
+	ret = sm2SignMsg(prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1, &KBJoinCir_DogApproveCat,
+		sizeof(KBJoinCir_DogApproveCat)-256, KBJoinCir_DogApproveCat.Signature);
+	if (ret != 0){
+		cc_error("SM2签名失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//13 bad Approver ID
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//错误的审批者ID
+	memcpy(KBJoinCir_DogApproveCat.KeyBagIDApprover, KEY_BAG_ID_CAT, KEYBAG_ID_LEN);
+	//KeyBagDog的私钥重新签名JoinCircle请求包
+	ret = sm2SignMsg(prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1, &KBJoinCir_DogApproveCat,
+		sizeof(KBJoinCir_DogApproveCat)-256, KBJoinCir_DogApproveCat.Signature);
+	if (ret != 0){
+		cc_error("SM2签名失败，Line:%d\n", __LINE__);
+		return 1;
+	}
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//14 bad signature
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//错误的签名
+	memset(KBJoinCir_DogApproveCat.Signature, 0, sizeof(KBJoinCir_DogApproveCat.Signature));
+	//加入Circle
+	ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+		bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+	if (ret == SENC_SUCCESS){//预期加入Circle失败
+		cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	//15 bad join circle packet
+	//构造加入Circle审批包
+	constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_CAT, PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+		KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//篡改Circle请求包的任一字节
+	for (i = 0; i < (sizeof(KBJoinCir_DogApproveCat)-sizeof(KBJoinCir_DogApproveCat.Signature) + 64); i++)
+	{
+		memcpy(&KBJoinCirApproveCommon, &KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat));
+		((uint8_t *)&KBJoinCirApproveCommon)[i] ++;
+
+		//加入Circle
+		ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCirApproveCommon, sizeof(KBJoinCirApproveCommon),
+			bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+		if (ret == SENC_SUCCESS){//预期加入Circle失败
+			cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+			return 1;
+		}
+	}
+#pragma endregion
+
+	free(KBCircle_Dog.kcPubKey);
+	free(KBCircle_Cat.kcPubKey);
+	free(KBCircleCommon.kcPubKey);
+	return 0;
+}
+
+//*函数：test_keymanage_joincircle
+//*功能：密钥管理加入circle测试
+//*参数：无
+//*日期：2018/12/18  by ZhangTao
+int test_keymanage_joincircle()
+{
+	int ret, i;
+	KeybagBindCode  KBBindCode_Dog, KBBindCode_Cat;
+	uint8_t bindcode_plain_Dog[BINDCODE_PLAIN_LEN], bindcode_plain_Cat[BINDCODE_PLAIN_LEN];
+	uint8_t phonenum_Dog[PHONE_NUMBER_LEN], phonenum_Cat[PHONE_NUMBER_LEN];
+	uint8_t bindcodeVeriCipher_Dog[256], bindcodeVeriCipher_Cat[256];
+	KeybagCreateCircleReq KBCreateCirReq_Dog;
+	KeybagCircle KBCircle_Dog, KBCircle_Cat, KBCircleCommon;
+	KeybagJoinCircleApprove KBJoinCir_DogApproveCat;
+	uint32_t Dogverilen, Catverilen;
+	uint32_t DogCirclelen;
+	uint32_t timestamp1, timestamp2;
+
+	KBCircle_Dog.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 20);
+	KBCircle_Cat.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 20);
+	KBCircleCommon.kcPubKey = malloc(sizeof(KeybagCirclePubkey)* 20);
+
+	uint8_t KEY_BAG_ID_COMMON[14][8] = { 0 };//Circle最多加入14个
+
+	//15 正确地加入Circle    Cat加入Dog的Circle
+	//构造绑定验证码    Dog创建Circle的绑定验证码
+	constructBindCode(&KBBindCode_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, BIND_CODE_DOG, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+		prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//签发绑定验证码
+	ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Dog, sizeof(KBBindCode_Dog), cacert, ca_certlen, keybagDogcert,
+		keybagDog_certlen, bindcode_plain_Dog, phonenum_Dog, bindcodeVeriCipher_Dog, &Dogverilen);
+	if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+		cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+	//构造创建Circle请求包
+	constructCircleReq(&KBCreateCirReq_Dog, KEY_BAG_ID_DOG, PHONE_NUMBER_DOG, bindcode_plain_Dog,
+		pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+	//创建Circle
+	ret = SENC_KeyManager_CreateCircle(dHandle, CIRCLE_ID_DOG, KBCreateCirReq_Dog, sizeof(KBCreateCirReq_Dog), bindcodeVeriCipher_Dog,
+		Dogverilen, &timestamp1, &KBCircle_Dog, &DogCirclelen);
+	if (ret != SENC_SUCCESS){//预期创建Circle成功
+		cc_error("CreateCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+		return 1;
+	}
+
+	for (i = 0; i < 14; i++)
+	{
+		KEY_BAG_ID_COMMON[i][7] = i + 2;
+
+		//构造绑定验证码    Cat加入Dog的Circle的绑定验证码
+		constructBindCode(&KBBindCode_Cat, KEY_BAG_ID_COMMON[i], PHONE_NUMBER_CAT, BIND_CODE_CAT, pubkey_jmj, SM2_PUBKEY_LEN + 1,
+			prikey_cat, SM2_PRIKEY_LEN, pubkey_cat, SM2_PUBKEY_LEN + 1);
+		//签发绑定验证码
+		ret = SENC_KeyManager_BindCode(dHandle, KBBindCode_Cat, sizeof(KBBindCode_Cat), cacert, ca_certlen, keybagCatcert,
+			keybagCat_certlen, bindcode_plain_Cat, phonenum_Cat, bindcodeVeriCipher_Cat, &Catverilen);
+		if (ret != SENC_SUCCESS){//预期签发绑定验证码成功
+			cc_error("BindCode Failed:0x%08X,Line:%d\n", ret, __LINE__);
+			return 1;
+		}
+		//构造加入Circle审批包
+		constructJoinCircle(&KBJoinCir_DogApproveCat, KEY_BAG_ID_COMMON[i], PHONE_NUMBER_DOG, KBCircle_Dog.Uuid, bindcode_plain_Cat,
+			KEY_BAG_ID_DOG, pubkey_cat + 1, SM2_PUBKEY_LEN, pubkey_jmj, SM2_PUBKEY_LEN + 1, prikey_dog, SM2_PRIKEY_LEN, pubkey_dog, SM2_PUBKEY_LEN + 1);
+		//加入Circle
+		ret = SENC_KeyManager_JoinCircle(dHandle, KBCircle_Dog, DogCirclelen, KBJoinCir_DogApproveCat, sizeof(KBJoinCir_DogApproveCat),
+			bindcodeVeriCipher_Cat, Catverilen, &timestamp2, &KBCircle_Dog, &DogCirclelen);
+		if (ret != SENC_SUCCESS){//预期加入Circle成功
+			cc_error("JoinCircle Failed:0x%08X,Line:%d\n", ret, __LINE__);
+			return 1;
+		}
+
+	}
+
+
+	free(KBCircle_Dog.kcPubKey);
+	free(KBCircle_Cat.kcPubKey);
+	free(KBCircleCommon.kcPubKey);
+	return 0;
+}
+
+int main()
+{
+	//测试初始化
+	if (test_init()){
+		printf("测试初始化失败！\n");
+		goto end;
+	}
+	printf("测试初始化成功！\n");
 	getchar();
 
-	if(test_negtive())
-		printf("消极测试失败！\n");
-	else
-		printf("消极测试成功！\n");
+	//全流程测试
+	if (test_keymanage_all()){
+		printf("密钥管理全流程测试失败！\n");
+		goto end;
+	}
+	printf("密钥管理全流程测试成功！\n");
+	getchar();
 
-	CloseDevice();
+
+	//消极测试
+	if (test_keymanage_positive()){
+		printf("密钥管理积极测试失败！\n");
+		goto end;
+	}
+	printf("密钥管理积极测试成功！\n");
+	getchar();
+
+	//积极测试
+	if (test_keymanage_negative()){
+		printf("密钥管理消极测试失败！\n");
+		goto end;
+	}
+	printf("密钥管理消极测试成功！\n");
+	getchar();
+
+	//加入Circle测试
+	if (test_keymanage_joincircle()){
+		printf("加入Circle测试失败！\n");
+		goto end;
+	}
+	printf("加入Circle测试成功！\n");
+
+	//关闭设备，释放设备列表
+	SENC_Close(dHandle);
+	SENC_FreeDevList(&gDevList);
+
 	printf("测试完成！\n");
 	getchar();
 
 end:
-
 	if (eckey)
 		EC_KEY_free(eckey);
 
 	if (group)
 		SM2_Cleanup(group);
 	
+	getchar();
 	return 0;
 }
